@@ -18,6 +18,8 @@ jobs:
             branch: humble
           - distro: iron
             branch: iron
+          - distro: jazzy
+            branch: jazzy
           - distro: rolling
             branch: rolling
     steps:
