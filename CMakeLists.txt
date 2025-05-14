@@ -14,6 +14,14 @@ pico_sdk_init()
 
 # Add the libmicroros directory to the linker search path
 link_directories(libmicroros)
+
+#=============================================================================
+# Include the MBot library and Robot Control library
+# Note: The RC library depends on the MBot library, so mbot must be added first
+#=============================================================================
+add_subdirectory(mbot)
+add_subdirectory(rc)
+
 # Define the executable target and its source files
 add_executable(pico_micro_ros_example
     pico_micro_ros_example.c     # Main application code
@@ -24,12 +32,15 @@ add_executable(pico_micro_ros_example
 target_link_libraries(pico_micro_ros_example
     pico_stdlib                  # The Pico standard library
     microros                     # The micro-ROS library
+    mbotlib                      # MBot hardware library
+    rclib                        # Robot Control library
     # Add your additional libraries here
 )
 
 # Add include directories for header files
 target_include_directories(pico_micro_ros_example PUBLIC
     libmicroros/include          # micro-ROS headers
+    include                      # Project-level include directory with configurations
     # Add your additional include directories here
 )
 

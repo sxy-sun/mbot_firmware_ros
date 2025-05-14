@@ -16,7 +16,10 @@
     - Reading and writing data over UART
     - Managing timeouts and error handling
     - Providing POSIX-like timing functions (`usleep` and `clock_gettime`)
-4. Supporting Files
+
+4. `mbot`: MBot Hardware Library
+5. `rc` (Robot Control): A library providing essential functions for robot control applications.
+6. Supporting Files
     - `available_ros2_types`: A list of all ROS 2 message, service, and action types available in the micro-ROS library
     - `built_packages`: A list of all Git repositories and their specific commit hashes used to build the micro-ROS library
 
