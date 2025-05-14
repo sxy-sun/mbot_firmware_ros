@@ -1,104 +1,29 @@
-![banner](.images/banner-dark-theme.png#gh-dark-mode-only)
-![banner](.images/banner-light-theme.png#gh-light-mode-only)
+# MBot Firmware (ROS2 Jazzy)
+## Project Components
 
-# micro-ROS module for Raspberry Pi Pico SDK
+1. `libmicroros`: This directory contains the precompiled micro-ROS static library (`libmicroros.a`) and all necessary header files for the Raspberry Pi Pico. This library includes:
+    - ROS 2 client library core functionality
+    - Message type definitions
+    - Transport layer implementations
+    - Serialization/deserialization utilities
+2. `microros_static_library`: Contains scripts and configuration files used to generate the `libmicroros` static library. We use it when we need to add customized ros data types. The key components include:
+    - `library_generation.sh`: Script that sets up the build environment, compiles micro-ROS packages, and generates the static library
+    - `colcon.meta`: Configuration for the colcon build system
+    - `toolchain.cmake`: CMake toolchain file for cross-compiling to Raspberry Pi Pico
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+3. `pico_uart_transport.c` & `pico_uart_transports.h`: These files implement the UART-based transport layer for micro-ROS on the Pico. The transport layer is responsible for:
+    - Opening and closing serial communication
+    - Reading and writing data over UART
+    - Managing timeouts and error handling
+    - Providing POSIX-like timing functions (`usleep` and `clock_gettime`)
+4. Supporting Files
+    - `available_ros2_types`: A list of all ROS 2 message, service, and action types available in the micro-ROS library
+    - `built_packages`: A list of all Git repositories and their specific commit hashes used to build the micro-ROS library
 
 ## Getting Started
 
-Here is a quick way to compile the example given in this repository.
-
-### Dependencies
-
-micro-ROS precompiled library is compiled using `arm-none-eabi-gcc` [9.3.1](https://developer.arm.com/-/media/Files/downloads/gnu-rm/9-2020q2/gcc-arm-none-eabi-9-2020-q2-update-x86_64-linux.tar.bz2), a compatible version is expected when building the micro-ROS project.
-You can specify a compiler path with the following command:
-
-```bash
-# Configure environment
-echo "export PICO_TOOLCHAIN_PATH=..." >> ~/.bashrc
-source ~/.bashrc
-```
-
-### 1. Install Pico SDK
-First, make sure the Pico SDK is properly installed and configured:
-
-```bash
-# Install dependencies
-sudo apt install cmake g++ gcc-arm-none-eabi doxygen libnewlib-arm-none-eabi git python3
-git clone --recurse-submodules https://github.com/raspberrypi/pico-sdk.git $HOME/pico-sdk
-
-# Configure environment
-echo "export PICO_SDK_PATH=$HOME/pico-sdk" >> ~/.bashrc
-source ~/.bashrc
-```
-
-### 2. Compile Example
-
-Once the Pico SDK is ready, compile the example:
-
-```bash
-cd micro_ros_raspberrypi_pico_sdk
-mkdir build
-cd build
-cmake ..
-make
-```
-
-To flash, hold the boot button, plug the USB and run:
-```
-cp pico_micro_ros_example.uf2 /media/$USER/RPI-RP2
-```
-
-### 3. Start Micro-ROS Agent
-Micro-ROS follows the client-server architecture, so you need to start the Micro-ROS Agent.
-You can do so using the [micro-ros-agent Snap](https://snapcraft.io/micro-ros-agent) (follow the link for installation details):
-
-```bash
-micro-ros-agent serial --dev /dev/ttyACM0 -b 115200
-```
-
-or using the [micro-ros-agent Docker](https://hub.docker.com/r/microros/micro-ros-agent):
-```bash
-docker run -it --rm -v /dev:/dev --privileged --net=host microros/micro-ros-agent:jazzy serial --dev /dev/ttyACM0 -b 115200
-```
-
-## What files are relevant?
-- `pico_uart_transport.c`: Contains the board specific implementation of the serial transport (no change needed).
-- `CMakeLists.txt`: CMake file.
-- `pico_micro_ros_example.c`: The actual ROS 2 publisher.
-
-## How to build the precompiled library
-
-Micro-ROS is precompiled for Raspberry Pi Pico in [`libmicroros`](libmicroros).
-If you want to compile it by yourself:
-
-```bash
-docker pull microros/micro_ros_static_library_builder:jazzy
-docker run -it --rm -v $(pwd):/project microros/micro_ros_static_library_builder:jazzy
-```
-
-Note that folders added to `microros_static_library/library_generation/extra_packages` and entries added to `microros_static_library/library_generation/extra_packages/extra_packages.repos` will be taken into account by this build system.
-## How to use Pico SDK?
-
-Here is a Raspberry Pi Pico C/C++ SDK documentation:
-https://datasheets.raspberrypi.org/pico/raspberry-pi-pico-c-sdk.pdf
-## Purpose of the Project
-
-This software is not ready for production use. It has neither been developed nor
-tested for a specific use case. However, the license conditions of the
-applicable Open Source licenses allow you to adapt the software to your needs.
-Before using it in a safety relevant setting, make sure that the software
-fulfills your requirements and adjust it according to any applicable safety
-standards, e.g., ISO 26262.
-
-## License
-
-This repository is open-sourced under the Apache-2.0 license. See the [LICENSE](LICENSE) file for details.
-
-For a list of other open-source components included in this repository,
-see the file [3rd-party-licenses.txt](3rd-party-licenses.txt).
-
-## Known Issues/Limitations
-
-There are no known limitations.
+1. Connect your Raspberry Pi Pico to your computer
+2. Build the project using CMake and the Pico SDK
+3. Flash the generated UF2 file to your Pico
+4. Run a micro-ROS agent on your host computer to bridge between the Pico and the ROS 2 network
+5. Start publishing/subscribing to ROS 2 topics from your Pico
