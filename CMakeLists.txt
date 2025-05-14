@@ -16,6 +16,14 @@ pico_sdk_init()
 link_directories(libmicroros)
 
 #=============================================================================
+# Global include directories for all targets
+#=============================================================================
+include_directories(
+    libmicroros/include          # micro-ROS headers
+    include                      # Project-level include directory with configurations
+)
+
+#=============================================================================
 # Include the MBot library and Robot Control library
 # Note: The RC library depends on the MBot library, so mbot must be added first
 #=============================================================================
@@ -37,12 +45,73 @@ target_link_libraries(pico_micro_ros_example
     # Add your additional libraries here
 )
 
-# Add include directories for header files
-target_include_directories(pico_micro_ros_example PUBLIC
-    libmicroros/include          # micro-ROS headers
-    include                      # Project-level include directory with configurations
-    # Add your additional include directories here
+#=============================================================================
+# Test programs - streamlined for Classic MBot only
+#=============================================================================
+# Motor Test for Classic MBot
+add_executable(mbot_classic_motor_test
+    tests/mbot_classic_motor_test.c
 )
+target_link_libraries(mbot_classic_motor_test
+    pico_stdlib
+    hardware_i2c
+    hardware_pio
+    hardware_pwm
+    mbotlib
+    rclib
+)
+pico_enable_stdio_usb(mbot_classic_motor_test 1)
+pico_enable_stdio_uart(mbot_classic_motor_test 0)
+pico_add_extra_outputs(mbot_classic_motor_test)
+
+# Encoder Test
+add_executable(mbot_encoder_test
+    tests/mbot_encoder_test.c
+)
+target_link_libraries(mbot_encoder_test
+    pico_stdlib
+    hardware_i2c
+    hardware_pio
+    hardware_pwm
+    mbotlib
+    rclib
+)
+pico_enable_stdio_usb(mbot_encoder_test 1)
+pico_enable_stdio_uart(mbot_encoder_test 0)
+pico_add_extra_outputs(mbot_encoder_test)
+
+# Motor Calibration for Classic MBot
+add_executable(mbot_calibrate_classic
+    tests/mbot_calibrate_classic.c
+)
+target_link_libraries(mbot_calibrate_classic
+    pico_stdlib
+    hardware_i2c
+    hardware_pio
+    hardware_pwm
+    mbotlib
+    rclib
+)
+pico_enable_stdio_usb(mbot_calibrate_classic 1)
+pico_enable_stdio_uart(mbot_calibrate_classic 0)
+pico_add_extra_outputs(mbot_calibrate_classic)
+
+# Analog Input Test
+add_executable(mbot_analog_input_test
+    tests/mbot_analog_input_test.c
+)
+target_link_libraries(mbot_analog_input_test
+    pico_stdlib
+    hardware_i2c
+    hardware_pio
+    hardware_pwm
+    hardware_adc
+    mbotlib
+    rclib
+)
+pico_enable_stdio_usb(mbot_analog_input_test 1)
+pico_enable_stdio_uart(mbot_analog_input_test 0)
+pico_add_extra_outputs(mbot_analog_input_test)
 
 #=============================================================================
 # [DO NOT CHANGE] Optimization settings
