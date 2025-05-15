@@ -45,6 +45,15 @@ target_link_libraries(pico_micro_ros_example
     # Add your additional libraries here
 )
 
+# [DO NOT CHANGE]
+# Disable CRLF handling for better performance with micro-ROS for main application
+# This means when printing to the console you need to use \r\n instead of \n
+target_compile_definitions(pico_micro_ros_example PRIVATE 
+    PICO_UART_ENABLE_CRLF_SUPPORT=0
+    PICO_STDIO_ENABLE_CRLF_SUPPORT=0
+    PICO_STDIO_DEFAULT_CRLF=0
+)
+
 #=============================================================================
 # Test programs - streamlined for Classic MBot only
 #=============================================================================
@@ -123,16 +132,11 @@ SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections")
 
 #=============================================================================
 # [DO NOT CHANGE] Pico-specific communication settings
-# These settings configure USB communication for micro-ROS
 #=============================================================================
 # Enable USB for stdio (for communication with host)
 pico_enable_stdio_usb(pico_micro_ros_example 1)
 # Disable default UART for stdio (using custom implementation instead)
 pico_enable_stdio_uart(pico_micro_ros_example 0)
-# Disable CRLF handling for better performance with micro-ROS
-add_compile_definitions(PICO_UART_ENABLE_CRLF_SUPPORT=0)
-add_compile_definitions(PICO_STDIO_ENABLE_CRLF_SUPPORT=0)
-add_compile_definitions(PICO_STDIO_DEFAULT_CRLF=0)
 
 # Generate UF2
 pico_add_extra_outputs(pico_micro_ros_example)

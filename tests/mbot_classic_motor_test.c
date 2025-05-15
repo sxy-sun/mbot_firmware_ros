@@ -39,15 +39,15 @@ int main() {
     mbot_motor_init_freq(MOT_L, freq);
 
     blink();
-    printf("\rTesting right motor...\n");
+    printf("Testing right motor...\n");
     drive_motor_up_down(MOT_R);
 
     blink();
-    printf("\rTesting left motor...\n");
+    printf("Testing left motor...\n");
     drive_motor_up_down(MOT_L);
 
     blink();
-    printf("\rDone!\n");
+    printf("Done!\n");
 
     mbot_motor_cleanup(MOT_R);
     mbot_motor_cleanup(MOT_L);
@@ -58,7 +58,7 @@ int main() {
 
 void drive_motor_up_down(int motor) {
     float d = 0;
-    printf("\rDriving Forward...\n");
+    printf("Driving Forward...\n");
     for (; d < 1.0; d += 0.01) {
         mbot_motor_set_duty(motor, d);
         sleep_ms(25);
@@ -67,7 +67,7 @@ void drive_motor_up_down(int motor) {
         mbot_motor_set_duty(motor, d);
         sleep_ms(25);
     }
-    printf("\rDriving Backward...\n");
+    printf("Driving Backward...\n");
     for (; d > -1.0; d -= 0.01) {
         mbot_motor_set_duty(motor, d);
         sleep_ms(25);

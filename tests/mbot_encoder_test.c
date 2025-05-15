@@ -22,14 +22,14 @@ int main() {
     while (1) {
         printf("\033[2J\r");
         printf("|              *** MBot Encoder Test ***              |\n");
-        printf("\r| ENC 0%s | ENC 1%s | ENC 2%s |  ENC 0 |  ENC 1 |  ENC 2 |\n", DELTA, DELTA, DELTA);
+        printf("| ENC 0%s | ENC 1%s | ENC 2%s |  ENC 0 |  ENC 1 |  ENC 2 |\n", DELTA, DELTA, DELTA);
         d1 = mbot_encoder_read_delta(0);
         d2 = mbot_encoder_read_delta(1);
         d3 = mbot_encoder_read_delta(2);
         t1 = mbot_encoder_read_count(0);
         t2 = mbot_encoder_read_count(1);
         t3 = mbot_encoder_read_count(2);
-        printf("\r| %7d| %7d| %7d| %7d| %7d| %7d|", d1, d2, d3, t1, t2, t3);
+        printf("| %7d| %7d| %7d| %7d| %7d| %7d|", d1, d2, d3, t1, t2, t3);
         sleep_ms(100);
     }
 }
