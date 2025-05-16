@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.12)
 include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
 # Define the project name and supported languages
-project(pico_micro_ros_example C CXX ASM)
+project(mbot_firmware_ros C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -30,25 +30,31 @@ include_directories(
 add_subdirectory(mbot)
 add_subdirectory(rc)
 
-# Define the executable target and its source files
-add_executable(pico_micro_ros_example
-    pico_micro_ros_example.c     # Main application code
-    pico_uart_transport.c        # UART transport implementation
-    # Add your additional source files here
+# Define the main executable target for MBot Classic ROS firmware
+add_executable(mbot_classic_ros
+    src/mbot_classic_ros.c       # Main application code
+    src/mbot_classic_ros.h       # Header file
+    include/pico_uart_transport.c  # UART transport implementation
 )
+
 # Link required libraries to the executable
-target_link_libraries(pico_micro_ros_example
+target_link_libraries(mbot_classic_ros
     pico_stdlib                  # The Pico standard library
+    pico_multicore               # For multicore support
+    hardware_i2c                 # I2C hardware support
+    hardware_pio                 # PIO hardware support
+    hardware_pwm                 # PWM hardware support
+    hardware_adc                 # ADC hardware support
+    hardware_sync                # Hardware synchronization
     microros                     # The micro-ROS library
     mbotlib                      # MBot hardware library
     rclib                        # Robot Control library
-    # Add your additional libraries here
 )
 
 # [DO NOT CHANGE]
 # Disable CRLF handling for better performance with micro-ROS for main application
 # This means when printing to the console you need to use \r\n instead of \n
-target_compile_definitions(pico_micro_ros_example PRIVATE 
+target_compile_definitions(mbot_classic_ros PRIVATE 
     PICO_UART_ENABLE_CRLF_SUPPORT=0
     PICO_STDIO_ENABLE_CRLF_SUPPORT=0
     PICO_STDIO_DEFAULT_CRLF=0
@@ -134,9 +140,9 @@ SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections")
 # [DO NOT CHANGE] Pico-specific communication settings
 #=============================================================================
 # Enable USB for stdio (for communication with host)
-pico_enable_stdio_usb(pico_micro_ros_example 1)
+pico_enable_stdio_usb(mbot_classic_ros 1)
 # Disable default UART for stdio (using custom implementation instead)
-pico_enable_stdio_uart(pico_micro_ros_example 0)
+pico_enable_stdio_uart(mbot_classic_ros 0)
 
 # Generate UF2
-pico_add_extra_outputs(pico_micro_ros_example)
+pico_add_extra_outputs(mbot_classic_ros)

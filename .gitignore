@@ -1,3 +1,5 @@
 /build
 pico-sdk
 .vscode
+old_src
+old_cmakelists_example.txt
