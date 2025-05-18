@@ -34,6 +34,8 @@ add_subdirectory(rc)
 add_executable(mbot_classic_ros
     src/mbot_classic_ros.c       # Main application code
     src/mbot_classic_ros.h       # Header file
+    src/mbot_odometry.c          # Odometry calculation
+    src/mbot_odometry.h          # Odometry header
     include/pico_uart_transport.c  # UART transport implementation
 )
 

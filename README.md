@@ -33,41 +33,6 @@ We are transitioning the MBot firmware from using LCM (Lightweight Communication
 - `old_src/`: Original firmware using LCM communication
 - `src/`: New microROS-based implementation (in progress)
 
-### Integration Strategy
-1. **Create ROS Communication Layer**
-   - Implement a complete microROS interface in `mbot_classic_ros.c/h`
-   - Map existing MBot data structures to standard ROS 2 message types
-   - Maintain same hardware control functionality
-
-2. **Message Type Mapping**
-   - IMU data → `sensor_msgs/Imu`
-   - Odometry → `nav_msgs/Odometry`
-   - Robot velocity → `geometry_msgs/Twist`
-   - Wheel state → `sensor_msgs/JointState`
-   - Motor commands → `std_msgs/Float32MultiArray`
-   - Encoder counts → `std_msgs/Int32MultiArray`
-   - Analog inputs → `std_msgs/Float32MultiArray`
-
-3. **Current Source Files**
-   ```
-   src/
-   ├── mbot_classic_ros.h       - MicroROS interface declaration
-   └── mbot_classic_ros.c       - MicroROS implementation + main entry point
-   ```
-
-4. **Implementation Steps**
-   - [x] Basic microROS setup skeleton
-   - [x] Configure CMakeLists.txt for the new firmware
-   - [x] Define data structures for robot state tracking
-   - [x] Set up main function and initialization structure
-   - [x] Initialize executor framework with timer and subscribers
-   - [ ] Next: Implement mbot_init_micro_ros_comm() to create publishers/subscribers
-   - [ ] Implement timer_callback() for periodic publishing
-   - [ ] Implement message conversion from internal state to ROS messages
-   - [ ] Implement subscriber callbacks to handle incoming commands
-   - [ ] Connect hardware interface to sensor reading
-   - [ ] Test with ROS 2 ecosystem
-
 ### Key Technical Considerations
 1. **No Custom Message Types**
    - Using only standard ROS 2 message types available in microROS
@@ -79,7 +44,7 @@ We are transitioning the MBot firmware from using LCM (Lightweight Communication
 
 3. **Timing Management**
    - Using ROS time synchronization instead of custom timestamps
-   - Maintaining fixed-rate control loops (10Hz for state publishing)
+   - Maintaining fixed-rate control loops (25Hz for state publishing)
 
 4. **State Tracking**
    - Using local state variables for robot state
@@ -91,12 +56,7 @@ We are transitioning the MBot firmware from using LCM (Lightweight Communication
 
 ### Testing Plan
 1. Basic connectivity with ROS 2 system
-2. Verify all topics publish correctly
+2. Verify all topics publish correctly with dummy data
+3. Add actual data to the publishers
 3. Command robot through ROS 2 topics
 4. Validate equivalent functionality to LCM version
-
-### Next Steps
-1. Implement the `mbot_init_micro_ros_comm()` function to initialize publishers, subscribers, and services
-2. Add message initialization and conversion code
-3. Implement callback functions for handling ROS messages
-4. Connect to hardware interfaces for sensor reading and motor control
