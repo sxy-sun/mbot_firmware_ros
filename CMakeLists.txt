@@ -21,6 +21,7 @@ link_directories(libmicroros)
 include_directories(
     libmicroros/include          # micro-ROS headers
     include                      # Project-level include directory with configurations
+    ${PICO_SDK_PATH}/lib/tinyusb/src
 )
 
 #=============================================================================
@@ -36,6 +37,8 @@ add_executable(mbot_classic_ros
     src/mbot_classic_ros.h       # Header file
     src/mbot_odometry.c          # Odometry calculation
     src/mbot_odometry.h          # Odometry header
+    src/usb_descriptors.c        # USB descriptors
+    src/dual_cdc.c               # Custom dual CDC implementation
     include/pico_uart_transport.c  # UART transport implementation
 )
 
@@ -51,6 +54,8 @@ target_link_libraries(mbot_classic_ros
     microros                     # The micro-ROS library
     mbotlib                      # MBot hardware library
     rclib                        # Robot Control library
+    tinyusb_device               # TinyUSB device support
+    tinyusb_board                # TinyUSB board support
 )
 
 # [DO NOT CHANGE]
@@ -130,6 +135,32 @@ pico_enable_stdio_usb(mbot_analog_input_test 1)
 pico_enable_stdio_uart(mbot_analog_input_test 0)
 pico_add_extra_outputs(mbot_analog_input_test)
 
+# Dual CDC Test
+add_executable(dual_cdc_test
+    tests/dual_cdc_test.c
+    src/dual_cdc.c
+    src/usb_descriptors.c
+)
+target_include_directories(dual_cdc_test PRIVATE include)
+target_link_libraries(dual_cdc_test
+    pico_stdlib
+    hardware_clocks
+    tinyusb_device
+    tinyusb_board
+)
+pico_add_extra_outputs(dual_cdc_test)
+
+# LED Blink Test
+add_executable(mbot_led_test
+    tests/mbot_led_test.c
+)
+target_link_libraries(mbot_led_test 
+    pico_stdlib
+)
+pico_enable_stdio_usb(mbot_led_test 1)
+pico_enable_stdio_uart(mbot_led_test 0)
+pico_add_extra_outputs(mbot_led_test)
+
 #=============================================================================
 # [DO NOT CHANGE] Optimization settings
 # These settings help reduce binary size - important for microcontrollers
@@ -145,6 +176,8 @@ SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections")
 pico_enable_stdio_usb(mbot_classic_ros 1)
 # Disable default UART for stdio (using custom implementation instead)
 pico_enable_stdio_uart(mbot_classic_ros 0)
+# Enable two CDC interfaces for dual USB serial ports
+target_compile_definitions(mbot_classic_ros PRIVATE CFG_TUD_CDC=2)
 
 # Generate UF2
 pico_add_extra_outputs(mbot_classic_ros)

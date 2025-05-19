@@ -33,6 +33,8 @@
 #include <mbot/encoder/encoder.h>
 #include <mbot/fram/fram.h>
 #include "mbot_odometry.h"
+#include <unistd.h>
+#include "dual_cdc.h"
 
 #ifndef PI
 #define PI 3.14159265358979323846f
@@ -106,6 +108,13 @@ static void mbot_read_imu(void);
 static void mbot_read_adc(void);
 static void mbot_publish_state(void);
 
+// Custom _write function for printf support
+int _write(int fd, const void *buf, size_t count) {
+    // Use our custom function to write to CDC0
+    dual_cdc_write_chars(0, buf, count);
+    return count;
+}
+
 // Initialize microROS
 int mbot_init_micro_ros(void) {
     // Set up transports
@@ -121,35 +130,26 @@ int mbot_init_micro_ros(void) {
     // Initialize allocator
     allocator = rcl_get_default_allocator();
 
-    // Wait for agent successful ping
-    const int timeout_ms = 1000;
-    const uint8_t attempts = 120;
-    
-    rcl_ret_t ret = rmw_uros_ping_agent(timeout_ms, attempts);
+    // Try to ping agent - non-blocking approach with short timeout
+    rcl_ret_t ret = rmw_uros_ping_agent(100, 1);
     if (ret != RCL_RET_OK) {
-        printf("Failed to ping agent, exiting\r\n");
-        return MBOT_ERROR;
+        return MBOT_ERROR_AGENT_UNREACHABLE;
     }
 
-    printf("Connected to micro-ROS agent!\r\n");
-    
-    // Initialize support
+    // From here, we proceed with initialization since agent is available
     ret = rclc_support_init(&support, 0, NULL, &allocator);
     if (ret != RCL_RET_OK) {
-        printf("Failed to initialize support\r\n");
         return MBOT_ERROR;
     }
     
     // Create node
     ret = rclc_node_init_default(&node, "pico_node", "", &support);
     if (ret != RCL_RET_OK) {
-        printf("Failed to create node\r\n");
         return MBOT_ERROR;
     }
     
     // Initialize communication (publishers/subscribers)
     if (mbot_init_micro_ros_comm() != MBOT_OK) {
-        printf("Failed to initialize ROS communication\r\n");
         return MBOT_ERROR;
     }
     
@@ -157,49 +157,56 @@ int mbot_init_micro_ros(void) {
     ret = rclc_timer_init_default2(
         &timer,
         &support,
-        RCL_MS_TO_NS((int)(MAIN_LOOP_PERIOD * 1000)),  // Convert to ms, matches MAIN_LOOP_HZ (25Hz)
+        RCL_MS_TO_NS((int)(MAIN_LOOP_PERIOD * 1000)),
         timer_callback,
-        NULL);  // User data pointer (not used)
+        NULL);
     if (ret != RCL_RET_OK) {
-        printf("Failed to create timer\r\n");
         return MBOT_ERROR;
     }
     
-    // Create executor with enough handles for our subscribers and timer
+    // Create executor
     ret = rclc_executor_init(&executor, &support.context, 6, &allocator);
     if (ret != RCL_RET_OK) {
-        printf("Failed to initialize executor\r\n");
         return MBOT_ERROR;
     }
     
     // Add timer to executor
     ret = rclc_executor_add_timer(&executor, &timer);
     if (ret != RCL_RET_OK) {
-        printf("Failed to add timer to executor\r\n");
         return MBOT_ERROR;
     }
     
     // Add subscribers to executor
     ret = rclc_executor_add_subscription(&executor, &cmd_vel_subscriber, &cmd_vel_msg, 
                                         &cmd_vel_callback, ON_NEW_DATA);
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
+    if (ret != RCL_RET_OK) {
+        return MBOT_ERROR;
+    }
     
     ret = rclc_executor_add_subscription(&executor, &motor_vel_cmd_subscriber, &motor_vel_cmd_msg, 
-                                        &motor_vel_cmd_callback, ON_NEW_DATA);
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
+                                       &motor_vel_cmd_callback, ON_NEW_DATA);
+    if (ret != RCL_RET_OK) {
+        return MBOT_ERROR;
+    }
     
     ret = rclc_executor_add_subscription(&executor, &motor_pwm_cmd_subscriber, &motor_pwm_cmd_msg, 
-                                        &motor_pwm_cmd_callback, ON_NEW_DATA);
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
+                                       &motor_pwm_cmd_callback, ON_NEW_DATA);
+    if (ret != RCL_RET_OK) {
+        return MBOT_ERROR;
+    }
     
     // Add services to executor
     ret = rclc_executor_add_service(&executor, &reset_odometry_service, &reset_odometry_req, 
-                                  &reset_odometry_res, &reset_odometry_callback);
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
+                                   &reset_odometry_res, &reset_odometry_callback);
+    if (ret != RCL_RET_OK) {
+        return MBOT_ERROR;
+    }
     
     ret = rclc_executor_add_service(&executor, &reset_encoders_service, &reset_encoders_req, 
-                                  &reset_encoders_res, &reset_encoders_callback);
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
+                                   &reset_encoders_res, &reset_encoders_callback);
+    if (ret != RCL_RET_OK) {
+        return MBOT_ERROR;
+    }
     
     return MBOT_OK;
 }
@@ -361,10 +368,24 @@ int mbot_init_micro_ros_comm(void) {
 
 // Handle incoming ROS messages
 int mbot_spin_micro_ros(void) {
+    // Do not call tud_task here as it's called in the main loop
+    static uint32_t spin_count = 0;
+    
+    // Log spin activity occasionally (every ~10 seconds)
+    if (spin_count % 1000 == 0) {
+        printf("microROS active - spin count: %lu\r\n", spin_count);
+    }
+    
     rcl_ret_t ret = rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
     if (ret != RCL_RET_OK) {
-        return MBOT_ERROR;
+        // Only report serious errors, not TIMEOUT which is common
+        if (ret != RCL_RET_TIMEOUT) {
+            printf("microROS spin error: %d\r\n", ret);
+            return MBOT_ERROR;
+        }
     }
+    
+    spin_count++;
     return MBOT_OK;
 }
 
@@ -584,60 +605,59 @@ static void mbot_calculate_diff_body_vel(float wheel_left_vel, float wheel_right
  * @brief Main entry point
  */
 int main() {
-    // Initialize the Pico hardware
-    bi_decl(bi_program_description("MBot Classic firmware with microROS"));
-    if(!set_sys_clock_khz(125000, true)) {
-        printf("ERROR: Cannot set system clock\r\n");
-        return -1;
-    }
-    
+    // Initialize stdio (sets up system clock and other defaults)
     stdio_init_all();
-    sleep_ms(3000);  // Match the working delay from analog_input_test
-    printf("\rMBot Booting Up!\r");  // Use \r for more reliable output
+    
+    // Initialize dual CDC interfaces
+    dual_cdc_init();
+    
+    printf("MBot Classic ROS - Starting up\r\n");
     
     // Initialize hardware components
-    sleep_ms(1000);
-    
-    // Initialize motors
-    printf("Initializing motors...\r\n");
     mbot_motor_init(MOT_L);
     mbot_motor_init(MOT_R);
-    
-    // Initialize encoders
-    printf("Initializing encoders...\r\n");
     mbot_encoder_init();
-    
-    // Initialize IMU 
-
-    // Initialize ADC
     adc_init();
     adc_gpio_init(26);
     adc_gpio_init(27);
     adc_gpio_init(28);
     adc_gpio_init(29);
-
-    // Initialize PWM LPFs for smoother motion
-    
-    // Initialize FRAM (non-critical, continue if fails)
-    printf("Initializing FRAM...\r\n");
     mbot_init_fram();
     
-    // Initialize microROS
-    printf("Initializing microROS...\r\n");
-    if (mbot_init_micro_ros() != MBOT_OK) {
-        printf("Failed to initialize microROS\r\n");
-        return -1;
-    }
-    
-    printf("Starting main loop...\r\n");
+    // Main loop
+    printf("Entering main loop\r\n");
+    uint32_t counter = 0;
+    bool microros_enabled = false;
     
     while (1) {
-        // Process incoming messages and services
-        mbot_spin_micro_ros();
+        // Process USB tasks every loop iteration
+        dual_cdc_task();
         
-        // Small delay to prevent CPU hogging
+        // Handle microROS
+        if (microros_enabled) {
+            // If already initialized, spin
+            if (mbot_spin_micro_ros() != MBOT_OK) {
+                // If it fails, mark as disconnected
+                microros_enabled = false;
+            }
+        } else {
+            // Not connected - try to initialize
+            int result = mbot_init_micro_ros();
+            if (result == MBOT_OK) {
+                microros_enabled = true;
+                printf("microROS connected\r\n");
+            }
+        }
+        
+        // Status output once every 5 seconds
+        if (counter % 500 == 0) {
+            printf("MBot running - microROS: %s\r\n", 
+                    microros_enabled ? "connected" : "waiting for agent");
+        }
+        
+        counter++;
         sleep_ms(10);
     }
     
     return 0;
-} 
+}

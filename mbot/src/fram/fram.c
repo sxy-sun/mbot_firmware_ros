@@ -104,17 +104,17 @@ int mbot_init_fram()
 
     // This function is broken, because __get_device_id is broken
     // We can still read and write to mem, just not check on startup that its the right chip
-    uint16_t manuf_id, prod_id;
-    __get_device_id(i2c, &manuf_id, &prod_id);
-    printf("IDs: %X, %X\n", manuf_id, prod_id);
-    if (manuf_id != FUJITSU_MANUF_ID){
-        printf("ERROR: manuf_id does not match FUJITSU_MANUF_ID\n");
-        //return -1;
-    }
-    if (prod_id != PROD_ID_MB85RC04V){
-        printf("ERROR: prod_id does not match PROD_ID_MB85RC04V\n");
-        //return -1;
-    }
+    // uint16_t manuf_id, prod_id;
+    // __get_device_id(i2c, &manuf_id, &prod_id);
+    // printf("IDs: %X, %X\r\n", manuf_id, prod_id);
+    // if (manuf_id != FUJITSU_MANUF_ID){
+    //     printf("ERROR: manuf_id does not match FUJITSU_MANUF_ID\r\n");
+    //     //return -1;
+    // }
+    // if (prod_id != PROD_ID_MB85RC04V){
+    //     printf("ERROR: prod_id does not match PROD_ID_MB85RC04V\r\n");
+    //     //return -1;
+    // }
     return 0;
 }
 

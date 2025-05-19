@@ -54,6 +54,19 @@ We are transitioning the MBot firmware from using LCM (Lightweight Communication
    - CRLF handling is disabled for performance optimization
    - All print statements use `\r\n` instead of just `\n`
 
+### Communication
+The firmware uses a single USB Type-C connection with dual CDC (Communication Device Class) interfaces:
+1. **Debug Channel** (`/dev/ttyACM0`):
+   - Used for firmware debug messages and status prints
+   - Accessible via standard serial tools: `sudo minicom -D /dev/ttyACM0 -b 115200`
+
+2. **MicroROS Channel** (`/dev/ttyACM1`):
+   - Dedicated to microROS communication
+   - Handles all ROS2 messages and services
+   - Used by micro-ros-agent for ROS2 bridge
+
+This dual-channel approach allows simultaneous debugging and ROS communication without additional hardware connections.
+
 ### Testing Plan
 1. Basic connectivity with ROS 2 system
 2. Verify all topics publish correctly with dummy data
