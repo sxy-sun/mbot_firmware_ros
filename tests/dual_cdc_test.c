@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
-#include "dual_cdc.h"
+#include "comms/dual_cdc.h"
+#include <string.h>
 
 int main() {
     // Initialize stdio (will set up the default system clock)

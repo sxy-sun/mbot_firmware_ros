@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <time.h>
 #include "pico/stdlib.h"
-#include "dual_cdc.h"
+#include "comms/dual_cdc.h"
 #include <uxr/client/profile/transport/custom/custom_transport.h>
 
 void usleep(uint64_t us)

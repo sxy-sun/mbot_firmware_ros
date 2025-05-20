@@ -2,15 +2,14 @@
  * @file mbot_classic_ros.c
  * @brief MicroROS integration for MBot Classic
  */
-#include "mbot_classic_ros.h"
-
+#include <stdio.h>
+#include <math.h>
+#include <unistd.h>
 #include <rcl/rcl.h>
 #include <rcl/error_handling.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
 #include <rmw_microros/rmw_microros.h>
-
-// Message types
 #include <std_msgs/msg/float32_multi_array.h>
 #include <std_msgs/msg/int32_multi_array.h>
 #include <sensor_msgs/msg/imu.h>
@@ -18,23 +17,19 @@
 #include <nav_msgs/msg/odometry.h>
 #include <std_srvs/srv/trigger.h>
 #include <rmw_microros/time_sync.h>
-
-// Hardware includes
-#include <stdio.h>
-#include <math.h>
-#include "pico/stdlib.h"
-#include "pico/binary_info.h"
-#include "pico/multicore.h"
-#include "hardware/clocks.h"
-#include "hardware/adc.h"
-#include "pico_uart_transports.h"
-#include "config/mbot_classic_config.h"
+#include <pico/stdlib.h>
+#include <pico/binary_info.h>
+#include <pico/multicore.h>
+#include <hardware/clocks.h>
+#include <hardware/adc.h>
 #include <mbot/motor/motor.h>
 #include <mbot/encoder/encoder.h>
 #include <mbot/fram/fram.h>
+#include "mbot_classic_ros.h"
 #include "mbot_odometry.h"
-#include <unistd.h>
-#include "dual_cdc.h"
+#include "config/mbot_classic_config.h"
+#include <comms/pico_uart_transports.h>
+#include <comms/dual_cdc.h>
 
 #ifndef PI
 #define PI 3.14159265358979323846f

@@ -15,70 +15,83 @@ pico_sdk_init()
 # Add the libmicroros directory to the linker search path
 link_directories(libmicroros)
 
-#=============================================================================
-# Global include directories for all targets
-#=============================================================================
 include_directories(
-    libmicroros/include          # micro-ROS headers
-    include                      # Project-level include directory with configurations
+    libmicroros/include
+    ${CMAKE_SOURCE_DIR}/include
     ${PICO_SDK_PATH}/lib/tinyusb/src
 )
 
-#=============================================================================
-# Include the MBot library and Robot Control library
-# Note: The RC library depends on the MBot library, so mbot must be added first
-#=============================================================================
+# Add subdirectories
 add_subdirectory(mbot)
 add_subdirectory(rc)
+add_subdirectory(comms)
 
-# Define the main executable target for MBot Classic ROS firmware
+# Common libraries used by multiple targets
+set(COMMON_LIBS
+    pico_stdlib
+    hardware_i2c
+    hardware_pio
+    hardware_pwm
+    hardware_adc
+)
+
+#=============================================================================
+# Main MBot Classic ROS Executable
+#=============================================================================
 add_executable(mbot_classic_ros
-    src/mbot_classic_ros.c       # Main application code
-    src/mbot_classic_ros.h       # Header file
-    src/mbot_odometry.c          # Odometry calculation
-    src/mbot_odometry.h          # Odometry header
-    src/usb_descriptors.c        # USB descriptors
-    src/dual_cdc.c               # Custom dual CDC implementation
-    include/pico_uart_transport.c  # UART transport implementation
+    src/mbot_classic_ros.c
+    src/mbot_classic_ros.h
+    src/mbot_odometry.c
+    src/mbot_odometry.h
 )
 
-# Link required libraries to the executable
 target_link_libraries(mbot_classic_ros
-    pico_stdlib                  # The Pico standard library
-    pico_multicore               # For multicore support
-    hardware_i2c                 # I2C hardware support
-    hardware_pio                 # PIO hardware support
-    hardware_pwm                 # PWM hardware support
-    hardware_adc                 # ADC hardware support
-    hardware_sync                # Hardware synchronization
-    microros                     # The micro-ROS library
-    mbotlib                      # MBot hardware library
-    rclib                        # Robot Control library
-    tinyusb_device               # TinyUSB device support
-    tinyusb_board                # TinyUSB board support
+    ${COMMON_LIBS}
+    pico_multicore
+    microros
+    mbotlib
+    rclib
+    comms
 )
+
+# Configure USB and output settings for main executable
+pico_enable_stdio_usb(mbot_classic_ros 1)
+pico_enable_stdio_uart(mbot_classic_ros 0)
+pico_add_extra_outputs(mbot_classic_ros)
 
 # [DO NOT CHANGE]
-# Disable CRLF handling for better performance with micro-ROS for main application
+# Disable CRLF handling for better performance with micro-ROS
 # This means when printing to the console you need to use \r\n instead of \n
 target_compile_definitions(mbot_classic_ros PRIVATE 
     PICO_UART_ENABLE_CRLF_SUPPORT=0
     PICO_STDIO_ENABLE_CRLF_SUPPORT=0
     PICO_STDIO_DEFAULT_CRLF=0
+    CFG_TUD_CDC=2
 )
 
 #=============================================================================
-# Test programs - streamlined for Classic MBot only
+# Test Programs
 #=============================================================================
-# Motor Test for Classic MBot
+
+# MBot Calibration
+add_executable(mbot_calibrate_classic
+    tests/mbot_calibrate_classic.c
+)
+target_link_libraries(mbot_calibrate_classic
+    ${COMMON_LIBS}
+    mbotlib
+    rclib
+)
+pico_enable_stdio_usb(mbot_calibrate_classic 1)
+pico_enable_stdio_uart(mbot_calibrate_classic 0)
+pico_add_extra_outputs(mbot_calibrate_classic)
+
+# Motor Test
 add_executable(mbot_classic_motor_test
     tests/mbot_classic_motor_test.c
 )
 target_link_libraries(mbot_classic_motor_test
-    pico_stdlib
-    hardware_i2c
-    hardware_pio
-    hardware_pwm
+    ${COMMON_LIBS}
     mbotlib
     rclib
 )
@@ -91,10 +104,7 @@ add_executable(mbot_encoder_test
     tests/mbot_encoder_test.c
 )
 target_link_libraries(mbot_encoder_test
-    pico_stdlib
-    hardware_i2c
-    hardware_pio
-    hardware_pwm
+    ${COMMON_LIBS}
     mbotlib
     rclib
 )
@@ -102,32 +112,12 @@ pico_enable_stdio_usb(mbot_encoder_test 1)
 pico_enable_stdio_uart(mbot_encoder_test 0)
 pico_add_extra_outputs(mbot_encoder_test)
 
-# Motor Calibration for Classic MBot
-add_executable(mbot_calibrate_classic
-    tests/mbot_calibrate_classic.c
-)
-target_link_libraries(mbot_calibrate_classic
-    pico_stdlib
-    hardware_i2c
-    hardware_pio
-    hardware_pwm
-    mbotlib
-    rclib
-)
-pico_enable_stdio_usb(mbot_calibrate_classic 1)
-pico_enable_stdio_uart(mbot_calibrate_classic 0)
-pico_add_extra_outputs(mbot_calibrate_classic)
-
 # Analog Input Test
 add_executable(mbot_analog_input_test
     tests/mbot_analog_input_test.c
 )
 target_link_libraries(mbot_analog_input_test
-    pico_stdlib
-    hardware_i2c
-    hardware_pio
-    hardware_pwm
-    hardware_adc
+    ${COMMON_LIBS}
     mbotlib
     rclib
 )
@@ -138,15 +128,15 @@ pico_add_extra_outputs(mbot_analog_input_test)
 # Dual CDC Test
 add_executable(dual_cdc_test
     tests/dual_cdc_test.c
-    src/dual_cdc.c
-    src/usb_descriptors.c
 )
-target_include_directories(dual_cdc_test PRIVATE include)
+target_include_directories(dual_cdc_test PRIVATE
+    include
+    comms/include
+)
 target_link_libraries(dual_cdc_test
     pico_stdlib
     hardware_clocks
-    tinyusb_device
-    tinyusb_board
+    comms
 )
 pico_add_extra_outputs(dual_cdc_test)
 
@@ -165,19 +155,5 @@ pico_add_extra_outputs(mbot_led_test)
 # [DO NOT CHANGE] Optimization settings
 # These settings help reduce binary size - important for microcontrollers
 #=============================================================================
-# -ffunction-sections and -fdata-sections allow unused code removal during linking
 SET(CMAKE_C_FLAGS  "${CMAKE_C_FLAGS} -ffunction-sections -fdata-sections")
 SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections")
-
-#=============================================================================
-# [DO NOT CHANGE] Pico-specific communication settings
-#=============================================================================
-# Enable USB for stdio (for communication with host)
-pico_enable_stdio_usb(mbot_classic_ros 1)
-# Disable default UART for stdio (using custom implementation instead)
-pico_enable_stdio_uart(mbot_classic_ros 0)
-# Enable two CDC interfaces for dual USB serial ports
-target_compile_definitions(mbot_classic_ros PRIVATE CFG_TUD_CDC=2)
-
-# Generate UF2
-pico_add_extra_outputs(mbot_classic_ros)

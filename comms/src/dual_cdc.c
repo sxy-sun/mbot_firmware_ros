@@ -1,4 +1,4 @@
-#include "dual_cdc.h"
+#include "comms/dual_cdc.h"
 #include "tusb.h"
 #include "pico/mutex.h"
 #include "pico/time.h"

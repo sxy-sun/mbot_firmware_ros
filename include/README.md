@@ -1,0 +1,1 @@
+TinyUSB needs to find tusb_config.h as "tusb_config.h" in include path, so don't move tusb_config.h anywhere else!
