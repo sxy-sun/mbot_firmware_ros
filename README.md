@@ -67,9 +67,22 @@ The firmware uses a single USB Type-C connection with dual CDC (Communication De
 
 This dual-channel approach allows simultaneous debugging and ROS communication without additional hardware connections.
 
-### Testing Plan
-1. Basic connectivity with ROS 2 system
-2. Verify all topics publish correctly with dummy data
-3. Add actual data to the publishers
-3. Command robot through ROS 2 topics
-4. Validate equivalent functionality to LCM version
+#### Important: Servicing TinyUSB and Using `sleep_ms`
+
+**TinyUSB (the USB stack used for CDC communication) requires frequent servicing via `tud_task()` (`dual_cdc_task()`).**
+If the USB stack is not serviced regularly (ideally every 1–10 ms), the host computer may think the device is unresponsive and disconnect the serial ports (`/dev/ttyACM0`, `/dev/ttyACM1`).
+
+**Do NOT use long `sleep_ms()` calls.**
+
+##### **Incorrect Usage (will cause USB ports to disappear):**
+```c
+// BAD: This will block USB for 2 seconds!
+sleep_ms(2000);
+```
+
+##### **Correct Usage (keeps USB alive):**
+Use the wait function we provide.
+```c
+#include "comms/dual_cdc.h";
+mbot_wait_ms(2000);
+```

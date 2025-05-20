@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+
 
 /**
  * @brief Initialize both CDC interfaces
@@ -52,4 +54,19 @@ int dual_cdc_available(int itf);
  */
 void dual_cdc_task(void);
 
+/**
+ * @brief Redirect the standard C library output functions to custom CDC implementation
+ * 
+ * @param fd The file descriptor (not used in this implementation)
+ * @param buf The buffer containing the data to write
+ * @param count The number of bytes to write
+ */
+int _write(int fd, const void *buf, size_t count);
+
+/**
+ * @brief Wait for a given number of milliseconds but still service USB
+ * 
+ * @param ms The number of milliseconds to wait
+ */
+void mbot_wait_ms(uint32_t ms);
 #endif // _DUAL_CDC_H_ 

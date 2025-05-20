@@ -112,13 +112,6 @@ static void mbot_read_imu(void);
 static void mbot_read_adc(void);
 static void mbot_publish_state(void);
 
-// Redirect the standard C library output functions to custom CDC implementation
-int _write(int fd, const void *buf, size_t count) {
-    // Use our custom function to write to CDC0
-    dual_cdc_write_chars(0, buf, count);
-    return count;
-}
-
 // Initialize microROS
 int mbot_init_micro_ros(void) {
     // Set up transports
@@ -615,9 +608,6 @@ int main() {
     // Initialize dual CDC interfaces
     dual_cdc_init();
 
-    // Small delay to ensure USB is ready for early prints
-    sleep_ms(3000);  
-
     printf("MBot Classic ROS - Starting up\r\n");
     
     // Initialize hardware components
@@ -645,13 +635,12 @@ int main() {
     
     // Main loop
     printf("Entering main loop\r\n");
-    uint32_t counter = 0;
     bool microros_enabled = false;
     
     while (1) {
         // Process USB tasks every loop iteration
         dual_cdc_task();
-        
+
         // Handle microROS
         if (microros_enabled) {
             // If already initialized, spin
@@ -667,15 +656,6 @@ int main() {
                 printf("microROS connected\r\n");
             }
         }
-        
-        // Status output once every 5 seconds
-        if (counter % 500 == 0) {
-            printf("MBot running - microROS: %s\r\n", 
-                    microros_enabled ? "connected" : "waiting for agent");
-        }
-        
-        counter++;
-        sleep_ms(10);
     }
     
     return 0;

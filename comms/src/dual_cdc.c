@@ -10,6 +10,22 @@ static mutex_t dual_cdc_mutex;
 // Timeout for CDC operations
 #define CDC_TIMEOUT_US 500000 // 500ms
 
+// Redirect the standard C library output functions to custom CDC implementation
+int _write(int fd, const void *buf, size_t count) {
+    // Use our custom function to write to CDC0
+    dual_cdc_write_chars(0, buf, count);
+    return count;
+}
+
+// Wait for a given number of milliseconds but still service USB
+void mbot_wait_ms(uint32_t ms) {
+    uint32_t start = time_us_32();
+    while ((time_us_32() - start) < ms * 1000) {
+        dual_cdc_task();
+        sleep_ms(1);
+    }
+}
+
 bool dual_cdc_init(void) {
     // Initialize the mutex
     mutex_init(&dual_cdc_mutex);
