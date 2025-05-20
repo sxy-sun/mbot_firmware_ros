@@ -68,11 +68,6 @@ typedef struct {
     int drive_mode;  // 0=PWM, 1=wheel vel, 2=body vel
 } mbot_cmd_t;
 
-// Global state variables
-extern mbot_state_t mbot_state;
-extern mbot_cmd_t mbot_cmd;
-extern mbot_params_t params;
-
 /**
  * @brief Initialize microROS communication
  * 

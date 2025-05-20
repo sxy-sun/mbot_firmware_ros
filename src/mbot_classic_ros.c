@@ -22,12 +22,19 @@
 #include <pico/multicore.h>
 #include <hardware/clocks.h>
 #include <hardware/adc.h>
+
+// mbotlib
 #include <mbot/motor/motor.h>
 #include <mbot/encoder/encoder.h>
 #include <mbot/fram/fram.h>
+#include <mbot/imu/imu.h>
+
+// mbot_classic_ros
 #include "mbot_classic_ros.h"
 #include "mbot_odometry.h"
 #include "config/mbot_classic_config.h"
+
+// comms
 #include <comms/pico_uart_transports.h>
 #include <comms/dual_cdc.h>
 
@@ -39,6 +46,8 @@
 mbot_state_t mbot_state = {0};
 mbot_cmd_t mbot_cmd = {0};
 mbot_params_t params;
+mbot_bhy_config_t mbot_imu_config;
+mbot_bhy_data_t mbot_imu_data;
 
 // Global MicroROS objects
 static rcl_allocator_t allocator;
@@ -103,7 +112,7 @@ static void mbot_read_imu(void);
 static void mbot_read_adc(void);
 static void mbot_publish_state(void);
 
-// Custom _write function for printf support
+// Redirect the standard C library output functions to custom CDC implementation
 int _write(int fd, const void *buf, size_t count) {
     // Use our custom function to write to CDC0
     dual_cdc_write_chars(0, buf, count);
@@ -605,19 +614,34 @@ int main() {
     
     // Initialize dual CDC interfaces
     dual_cdc_init();
-    
+
+    // Small delay to ensure USB is ready for early prints
+    sleep_ms(3000);  
+
     printf("MBot Classic ROS - Starting up\r\n");
     
     // Initialize hardware components
+    printf("Initializing motors...\r\n");
     mbot_motor_init(MOT_L);
     mbot_motor_init(MOT_R);
+
+    printf("Initializing encoders...\r\n");
     mbot_encoder_init();
+
+    printf("Initializing ADC...\r\n");
     adc_init();
     adc_gpio_init(26);
     adc_gpio_init(27);
     adc_gpio_init(28);
     adc_gpio_init(29);
+
+    printf("Initializing FRAM...\r\n");
     mbot_init_fram();
+
+    printf("Initializing IMU...\r\n");
+    mbot_imu_config = mbot_imu_default_config();
+    mbot_imu_config.sample_rate = 200;
+    mbot_imu_init(&mbot_imu_data, mbot_imu_config);
     
     // Main loop
     printf("Entering main loop\r\n");
