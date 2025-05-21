@@ -56,6 +56,7 @@ typedef struct {
     // Status
     bool comms_active;
     int64_t last_encoder_time;
+    int64_t encoder_delta_t;
 } mbot_state_t;
 
 // Command structure
@@ -67,6 +68,10 @@ typedef struct {
     float motor_pwm[NUM_MOT_SLOTS];
     int drive_mode;  // 0=PWM, 1=wheel vel, 2=body vel
 } mbot_cmd_t;
+
+// Extern declarations for global state variables defined in mbot_classic_ros.c
+extern mbot_state_t mbot_state;
+extern mbot_cmd_t mbot_cmd;
 
 /**
  * @brief Initialize microROS communication

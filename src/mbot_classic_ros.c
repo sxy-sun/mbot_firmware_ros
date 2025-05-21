@@ -4,18 +4,11 @@
  */
 #include <stdio.h>
 #include <math.h>
-#include <unistd.h>
 #include <rcl/rcl.h>
 #include <rcl/error_handling.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
 #include <rmw_microros/rmw_microros.h>
-#include <std_msgs/msg/float32_multi_array.h>
-#include <std_msgs/msg/int32_multi_array.h>
-#include <sensor_msgs/msg/imu.h>
-#include <geometry_msgs/msg/twist.h>
-#include <nav_msgs/msg/odometry.h>
-#include <std_srvs/srv/trigger.h>
 #include <rmw_microros/time_sync.h>
 #include <pico/stdlib.h>
 #include <pico/binary_info.h>
@@ -36,6 +29,7 @@
 #include "mbot_classic_ros.h"
 #include "mbot_odometry.h"
 #include "config/mbot_classic_config.h"
+#include "mbot_ros_comms.h"
 
 // comms
 #include <comms/pico_uart_transports.h>
@@ -43,7 +37,6 @@
 
 // robot control
 #include <rc/math/filter.h>
-#include <rc/mpu/mpu.h>
 
 #ifndef PI
 #define PI 3.14159265358979323846f
@@ -66,62 +59,19 @@ static rcl_node_t node;
 static rclc_executor_t executor;
 
 // Timer for periodic publishing
-static rcl_timer_t timer;
-static repeating_timer_t mbot_main_timer;
+static rcl_timer_t ros_publish_timer;
+static repeating_timer_t mbot_loop_timer;
 
-// Define ROS publishers
-static rcl_publisher_t imu_publisher;
-static rcl_publisher_t odom_publisher;
-static rcl_publisher_t encoders_publisher;
-static rcl_publisher_t mbot_vel_publisher;
-static rcl_publisher_t motor_vel_publisher;
-static rcl_publisher_t motor_pwm_publisher;
-static rcl_publisher_t analog_publisher;
-
-// Define ROS messages
-static sensor_msgs__msg__Imu imu_msg;
-static nav_msgs__msg__Odometry odom_msg;
-static std_msgs__msg__Int32MultiArray encoders_msg;
-static geometry_msgs__msg__Twist mbot_vel_msg;
-static std_msgs__msg__Float32MultiArray motor_vel_msg;
-static std_msgs__msg__Float32MultiArray motor_pwm_msg;
-static std_msgs__msg__Float32MultiArray analog_msg;
-
-// Define ROS subscribers
-static rcl_subscription_t cmd_vel_subscriber;
-static rcl_subscription_t motor_vel_cmd_subscriber;
-static rcl_subscription_t motor_pwm_cmd_subscriber;
-
-// Define ROS subscription messages
-static geometry_msgs__msg__Twist cmd_vel_msg;
-static std_msgs__msg__Float32MultiArray motor_vel_cmd_msg;
-static std_msgs__msg__Float32MultiArray motor_pwm_cmd_msg;
-
-// Define ROS services
-static rcl_service_t reset_odometry_service;
-static rcl_service_t reset_encoders_service;
-
-// Define ROS service messages
-static std_srvs__srv__Trigger_Request reset_odometry_req;
-static std_srvs__srv__Trigger_Response reset_odometry_res;
-static std_srvs__srv__Trigger_Request reset_encoders_req;
-static std_srvs__srv__Trigger_Response reset_encoders_res;
-
-// Callback function prototypes
-void cmd_vel_callback(const void * msg);
-void motor_vel_cmd_callback(const void * msg);
-void motor_pwm_cmd_callback(const void * msg);
-void timer_callback(rcl_timer_t * timer, int64_t last_call_time);
-void reset_odometry_callback(const void * request, void * response);
-void reset_encoders_callback(const void * request, void * response);
-
-static void mbot_calculate_diff_body_vel(float wheel_left_vel, float wheel_right_vel, float* vx, float* vy, float* wz);
-static void mbot_calculate_motor_vel(void);
-static void mbot_read_encoders(void);
-static void mbot_read_imu(void);
-static void mbot_read_adc(void);
 static void mbot_publish_state(void);
-static bool mbot_loop(repeating_timer_t *rt);
+static bool mbot_loop_callback(repeating_timer_t *rt);
+void timer_callback(rcl_timer_t * timer, int64_t last_call_time);
+
+static int mbot_init_hardware(void);
+static void mbot_read_imu(void);
+static void mbot_read_encoders(void);
+static void mbot_read_adc(void);
+static void mbot_calculate_motor_vel(void);
+static void mbot_calculate_diff_body_vel(float wheel_left_vel, float wheel_right_vel, float* vx, float* vy, float* wz);
 static void print_mbot_params(const mbot_params_t* params);
 
 // Initialize microROS
@@ -157,14 +107,22 @@ int mbot_init_micro_ros(void) {
         return MBOT_ERROR;
     }
     
-    // Initialize communication (publishers/subscribers)
-    if (mbot_init_micro_ros_comm() != MBOT_OK) {
-        return MBOT_ERROR;
-    }
+    // Initialize ROS messages, publishers, subscribers, services using the new module
+    ret = mbot_ros_comms_init_messages(&allocator);
+    if (ret != MBOT_OK) return MBOT_ERROR;
+
+    ret = mbot_ros_comms_init_publishers(&node);
+    if (ret != MBOT_OK) return MBOT_ERROR;
+
+    ret = mbot_ros_comms_init_subscribers(&node);
+    if (ret != MBOT_OK) return MBOT_ERROR;
+
+    ret = mbot_ros_comms_init_services(&node);
+    if (ret != MBOT_OK) return MBOT_ERROR;
     
-    // Create timer for periodic publishing
+    // Create timer for periodic state publishing
     ret = rclc_timer_init_default2(
-        &timer,
+        &ros_publish_timer,
         &support,
         RCL_MS_TO_NS((int)(ROS_TIMER_PERIOD * 1000)),
         timer_callback,
@@ -180,301 +138,27 @@ int mbot_init_micro_ros(void) {
     }
     
     // Add timer to executor
-    ret = rclc_executor_add_timer(&executor, &timer);
+    ret = rclc_executor_add_timer(&executor, &ros_publish_timer);
     if (ret != RCL_RET_OK) {
         return MBOT_ERROR;
     }
     
-    // Add subscribers to executor
-    ret = rclc_executor_add_subscription(&executor, &cmd_vel_subscriber, &cmd_vel_msg, 
-                                        &cmd_vel_callback, ON_NEW_DATA);
-    if (ret != RCL_RET_OK) {
-        return MBOT_ERROR;
-    }
-    
-    ret = rclc_executor_add_subscription(&executor, &motor_vel_cmd_subscriber, &motor_vel_cmd_msg, 
-                                       &motor_vel_cmd_callback, ON_NEW_DATA);
-    if (ret != RCL_RET_OK) {
-        return MBOT_ERROR;
-    }
-    
-    ret = rclc_executor_add_subscription(&executor, &motor_pwm_cmd_subscriber, &motor_pwm_cmd_msg, 
-                                       &motor_pwm_cmd_callback, ON_NEW_DATA);
-    if (ret != RCL_RET_OK) {
-        return MBOT_ERROR;
-    }
-    
-    // Add services to executor
-    ret = rclc_executor_add_service(&executor, &reset_odometry_service, &reset_odometry_req, 
-                                   &reset_odometry_res, &reset_odometry_callback);
-    if (ret != RCL_RET_OK) {
-        return MBOT_ERROR;
-    }
-    
-    ret = rclc_executor_add_service(&executor, &reset_encoders_service, &reset_encoders_req, 
-                                   &reset_encoders_res, &reset_encoders_callback);
-    if (ret != RCL_RET_OK) {
-        return MBOT_ERROR;
-    }
+    // Add subscribers and services to executor using the helper from the comms module
+    ret = mbot_ros_comms_add_to_executor(&executor);
+    if (ret != MBOT_OK) return MBOT_ERROR;
     
     return MBOT_OK;
 }
-
-// Set up publishers and subscribers
-int mbot_init_micro_ros_comm(void) {
-    rcl_ret_t ret;
-    
-    // Initialize publishers
-    ret = rclc_publisher_init_default(
-        &imu_publisher,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
-        "imu"
-    );
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
-
-    ret = rclc_publisher_init_default(
-        &odom_publisher,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(nav_msgs, msg, Odometry),
-        "odom"
-    );
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
-
-    ret = rclc_publisher_init_default(
-        &encoders_publisher,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Int32MultiArray),
-        "encoders"
-    );
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
-
-    ret = rclc_publisher_init_default(
-        &mbot_vel_publisher,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
-        "mbot_vel"
-    );
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
-
-    ret = rclc_publisher_init_default(
-        &motor_vel_publisher,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32MultiArray),
-        "motor_vel"
-    );
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
-
-    ret = rclc_publisher_init_default(
-        &motor_pwm_publisher,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32MultiArray),
-        "motor_pwm"
-    );
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
-
-    ret = rclc_publisher_init_default(
-        &analog_publisher,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32MultiArray),
-        "analog"
-    );
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
-
-    // Initialize message arrays for publishers
-    // IMU message initialization
-    imu_msg.header.frame_id.data = (char*)malloc(20 * sizeof(char));
-    imu_msg.header.frame_id.capacity = 20;
-    snprintf(imu_msg.header.frame_id.data, 20, "base_link");
-    imu_msg.header.frame_id.size = strlen(imu_msg.header.frame_id.data);
-
-    // Odometry message initialization
-    odom_msg.header.frame_id.data = (char*)malloc(20 * sizeof(char));
-    odom_msg.header.frame_id.capacity = 20;
-    snprintf(odom_msg.header.frame_id.data, 20, "odom");
-    odom_msg.header.frame_id.size = strlen(odom_msg.header.frame_id.data);
-    odom_msg.child_frame_id.data = (char*)malloc(20 * sizeof(char));
-    odom_msg.child_frame_id.capacity = 20;
-    snprintf(odom_msg.child_frame_id.data, 20, "base_footprint");
-    odom_msg.child_frame_id.size = strlen(odom_msg.child_frame_id.data);
-
-    // Encoders message initialization
-    encoders_msg.data.capacity = NUM_MOT_SLOTS;
-    encoders_msg.data.size = NUM_MOT_SLOTS;
-    encoders_msg.data.data = (int32_t*)malloc(NUM_MOT_SLOTS * sizeof(int32_t));
-
-    // Motor velocity message initialization
-    motor_vel_msg.data.capacity = NUM_MOT_SLOTS;
-    motor_vel_msg.data.size = NUM_MOT_SLOTS;
-    motor_vel_msg.data.data = (float*)malloc(NUM_MOT_SLOTS * sizeof(float));
-
-    // Motor PWM message initialization
-    motor_pwm_msg.data.capacity = NUM_MOT_SLOTS;
-    motor_pwm_msg.data.size = NUM_MOT_SLOTS;
-    motor_pwm_msg.data.data = (float*)malloc(NUM_MOT_SLOTS * sizeof(float));
-
-    // Analog message initialization
-    analog_msg.data.capacity = 4;  // 4 ADC channels
-    analog_msg.data.size = 4;
-    analog_msg.data.data = (float*)malloc(4 * sizeof(float));
-
-    // Initialize subscribers 
-    ret = rclc_subscription_init_default(
-        &cmd_vel_subscriber,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
-        "cmd_vel"
-    );
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
-
-    // Initialize motor velocity command subscriber
-    ret = rclc_subscription_init_default(
-        &motor_vel_cmd_subscriber,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32MultiArray),
-        "motor_vel_cmd"
-    );
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
-
-    // Initialize motor PWM command subscriber
-    ret = rclc_subscription_init_default(
-        &motor_pwm_cmd_subscriber,
-        &node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32MultiArray),
-        "motor_pwm_cmd"
-    );
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
-
-    // Initialize the message arrays for motor commands
-    motor_vel_cmd_msg.data.capacity = NUM_MOT_SLOTS;
-    motor_vel_cmd_msg.data.size = NUM_MOT_SLOTS;
-    motor_vel_cmd_msg.data.data = (float*)malloc(NUM_MOT_SLOTS * sizeof(float));
-
-    motor_pwm_cmd_msg.data.capacity = NUM_MOT_SLOTS;
-    motor_pwm_cmd_msg.data.size = NUM_MOT_SLOTS;
-    motor_pwm_cmd_msg.data.data = (float*)malloc(NUM_MOT_SLOTS * sizeof(float));
-    
-    // Initialize services
-    ret = rclc_service_init_default(
-        &reset_odometry_service,
-        &node,
-        ROSIDL_GET_SRV_TYPE_SUPPORT(std_srvs, srv, Trigger),
-        "reset_odometry"
-    );
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
-
-    ret = rclc_service_init_default(
-        &reset_encoders_service,
-        &node,
-        ROSIDL_GET_SRV_TYPE_SUPPORT(std_srvs, srv, Trigger),
-        "reset_encoders"
-    );
-    if (ret != RCL_RET_OK) return MBOT_ERROR;
-    
-    return MBOT_OK;
-}
-
 
 // Handle incoming ROS messages
 int mbot_spin_micro_ros(void) {
-    // Do not call tud_task here as it's called in the main loop
-    static uint32_t spin_count = 0;
-    
-    // Log spin activity occasionally (every ~10 seconds)
-    if (spin_count % 1000 == 0) {
-        printf("microROS active - spin count: %lu\r\n", spin_count);
-    }
-    
     rcl_ret_t ret = rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
-    if (ret != RCL_RET_OK) {
-        // Only report serious errors, not TIMEOUT which is common
-        if (ret != RCL_RET_TIMEOUT) {
-            printf("microROS spin error: %d\r\n", ret);
-            return MBOT_ERROR;
-        }
+    if (ret != RCL_RET_OK && ret != RCL_RET_TIMEOUT) {
+        printf("microROS spin error: %d\r\n", ret);
+        return MBOT_ERROR;
     }
     
-    spin_count++;
     return MBOT_OK;
-}
-
-// Callback for velocity commands
-void cmd_vel_callback(const void * msg) {
-    const geometry_msgs__msg__Twist * twist_msg = (const geometry_msgs__msg__Twist *)msg;
-    mbot_cmd.vx = twist_msg->linear.x;
-    mbot_cmd.vy = twist_msg->linear.y;
-    mbot_cmd.wz = twist_msg->angular.z;
-    mbot_cmd.drive_mode = MODE_MBOT_VEL;
-    mbot_state.comms_active = true;
-}
-
-// Callback for motor velocity commands
-void motor_vel_cmd_callback(const void * msg) {
-    const std_msgs__msg__Float32MultiArray * vel_msg = (const std_msgs__msg__Float32MultiArray *)msg;
-    for(int i = 0; i < NUM_MOT_SLOTS; i++) {
-        mbot_cmd.wheel_vel[i] = vel_msg->data.data[i];
-    }
-    mbot_cmd.drive_mode = MODE_MOTOR_VEL_OL;
-    mbot_state.comms_active = true;
-}
-
-// Callback for motor PWM commands
-void motor_pwm_cmd_callback(const void * msg) {
-    const std_msgs__msg__Float32MultiArray * pwm_msg = (const std_msgs__msg__Float32MultiArray *)msg;
-    for(int i = 0; i < NUM_MOT_SLOTS; i++) {
-        mbot_cmd.motor_pwm[i] = pwm_msg->data.data[i];
-    }
-    mbot_cmd.drive_mode = MODE_MOTOR_PWM;
-    mbot_state.comms_active = true;
-}
-
-// Calculate motor velocities from encoder ticks
-static void mbot_calculate_motor_vel(void) {
-    float conversion = (1.0 / GEAR_RATIO) * (1.0 / ENCODER_RES) * 1E6f * 2.0 * PI;
-    int64_t delta_time = mbot_state.timestamp_us - mbot_state.last_encoder_time;
-    
-    mbot_state.wheel_vel[MOT_L] = params.encoder_polarity[MOT_L] * 
-        (conversion / delta_time) * mbot_state.encoder_delta_ticks[MOT_L];
-    mbot_state.wheel_vel[MOT_R] = params.encoder_polarity[MOT_R] * 
-        (conversion / delta_time) * mbot_state.encoder_delta_ticks[MOT_R];
-        
-    mbot_state.last_encoder_time = mbot_state.timestamp_us;
-}
-
-static void mbot_read_encoders(void) {
-    int64_t now = time_us_64();
-    int64_t delta_time = now - mbot_state.last_encoder_time;
-    mbot_state.last_encoder_time = now;
-
-    mbot_state.encoder_ticks[MOT_L] = mbot_encoder_read_count(MOT_L);
-    mbot_state.encoder_ticks[MOT_R] = mbot_encoder_read_count(MOT_R);
-    mbot_state.encoder_delta_ticks[MOT_L] = mbot_encoder_read_delta(MOT_L);
-    mbot_state.encoder_delta_ticks[MOT_R] = mbot_encoder_read_delta(MOT_R);
-    // Do NOT update mbot_state.timestamp_us here!
-}
-
-static void mbot_read_imu(void) {
-    for(int i = 0; i < 3; i++) {
-        mbot_state.imu_gyro[i] = mbot_imu_data.gyro[i];
-        mbot_state.imu_accel[i] = mbot_imu_data.accel[i];
-        mbot_state.imu_mag[i] = mbot_imu_data.mag[i];
-        mbot_state.imu_rpy[i] = mbot_imu_data.rpy[i];
-    }
-    for(int i = 0; i < 4; i++) {
-        mbot_state.imu_quat[i] = mbot_imu_data.quat[i];
-    }
-}
-
-static void mbot_read_adc(void) {
-    const float conversion_factor = 3.0f / (1 << 12);
-    int16_t raw;
-    for(int i = 0; i < 4; i++) {
-        adc_select_input(i);
-        raw = adc_read();
-        mbot_state.analog_in[i] = conversion_factor * raw;
-    }
-    // last channel is battery voltage (has 5x divider)
-    mbot_state.analog_in[3] = 5.0f * conversion_factor * raw;
 }
 
 // Publish all robot state to ROS topics
@@ -564,12 +248,11 @@ static void mbot_publish_state(void) {
 }
 
 // Main robot logic loop, runs at MAIN_LOOP_HZ (called by hardware timer)
-bool mbot_loop(repeating_timer_t *rt) {
+bool mbot_loop_callback(repeating_timer_t *rt) {
     mbot_read_encoders();    
     mbot_read_imu();
     mbot_read_adc();
 
-    // Update the global state timestamp ONCE after all sensors are read
     mbot_state.timestamp_us = time_us_64();
 
     mbot_calculate_motor_vel();
@@ -590,45 +273,105 @@ bool mbot_loop(repeating_timer_t *rt) {
         &mbot_state.odom_theta
     );
     
+    // TODO: Drive the motors here, only run when we have 2 way com
+
+    // TODO: check for time out here, if so, stop the motors
+    // TODO: Consider how mbot_state.comms_active is managed for timeout.
+    //       It's set true in ROS message callbacks. It needs a mechanism to become false.
     return true; // Keep timer running
 }
 
 // Timer callback for periodic ROS publishing (runs at ROS_TIMER_HZ)
 void timer_callback(rcl_timer_t * timer, int64_t last_call_time) {
-    RCLC_UNUSED(last_call_time);
-    if (timer == NULL) return;
+    (void)last_call_time; // Unused
+    (void)timer;          // Unused
     mbot_publish_state();
 }
 
-// Callback for reset odometry service
-void reset_odometry_callback(const void * request, void * response) {
-    // For future implementation
+/**
+ * @brief Main entry point
+ */
+int main() {
+    // Initialize Dual CDC and stdio
+    stdio_init_all();
+    dual_cdc_init();
+    mbot_wait_ms(2000);
+    
+    printf("\r\nMBot Classic Firmware (ROS2)\r\n");
+    printf("--------------------------------\r\n");
+
+    mbot_init_hardware();
+
+    mbot_read_fram(0, sizeof(params), (uint8_t*)&params);
+
+    printf("\nCalibration Parameters:\n");
+    print_mbot_params(&params);
+
+    int validate_status = validate_mbot_classic_FRAM_data(&params, MOT_L, MOT_R, MOT_UNUSED);
+    if (validate_status < 0){
+        printf("Failed to validate FRAM Data! Error code: %d\n", validate_status);
+        return -1;
+    }
+
+    printf("\nStarting MBot Loop...\n");
+    mbot_state.last_encoder_time = time_us_64(); 
+    if (!add_repeating_timer_ms((int32_t)(MAIN_LOOP_PERIOD * 1000.0f), mbot_loop_callback, NULL, &mbot_loop_timer)){
+        printf("Failed to add control loop timer! Halting.\r\n");
+        while(1) {tight_loop_contents();}
+    }
+
+    printf("Initializing microROS...\n");
+    // TODO: Initialize microROS here - This is where mbot_init_micro_ros() should be called.
+    //       And its return status should be checked to proceed.
+    // bool microros_initialized_successfully = false; // Variable to track initialization status
+
+    printf("Done Booting Up!\n");
+    fflush(stdout); 
+
+    static int64_t last_print_time = 0;
+    while (1) {
+        dual_cdc_task(); // Keep USB alive - CRITICAL
+
+        // TODO: Micro-ROS Logic - UNCOMMENT AND COMPLETE THIS SECTION
+        // if (microros_initialized_successfully) {
+        //     if (mbot_spin_micro_ros() != MBOT_OK) {
+        //         // Handle spin error - perhaps agent disconnected?
+        //         printf("microROS spin error. Agent might have disconnected.\r\n");
+        //         // microros_initialized_successfully = false; // Attempt to re-initialize or enter error state
+        //         // mbot_state.comms_active = false;
+        //         // TODO: Implement robust error handling for microROS disconnection (e.g., retry N times, then signal error)
+        //     }
+        // } else {
+        //     // Attempt to initialize microROS if not already done (or if re-initialization is needed)
+        //     // printf("Attempting to initialize microROS...\r\n"); // Repetitive if called every loop iteration
+        //     // if (mbot_init_micro_ros() == MBOT_OK) {
+        //     //     microros_initialized_successfully = true;
+        //     //     printf("microROS Initialized Successfully.\r\n");
+        //     //     // mbot_state.comms_active = true; // Set true once agent is confirmed, not just init
+        //     // } else {
+        //     //     // printf("microROS initialization failed. Will retry.\r\n");
+        //     //     mbot_wait_ms(1000); // Wait before retrying to prevent spamming
+        //     // }
+        // }
+        // TODO:
+        // Add a line in print table to show if microROS is active or not
+        // Non-blocking periodic print
+        if (time_us_64() - last_print_time > 200000) { // 200ms interval
+            mbot_print_state(&mbot_state);
+            last_print_time = time_us_64();
+        }
+    }
+    return 0;
 }
 
-// Callback for reset encoders service
-void reset_encoders_callback(const void * request, void * response) {
-    // For future implementation
-}
-
-// Calculate body velocities from wheel velocities
-static void mbot_calculate_diff_body_vel(float wheel_left_vel, float wheel_right_vel, float* vx, float* vy, float* wz) {
-    // Calculate forward velocity and angular velocity
-    *vx = DIFF_WHEEL_RADIUS * (wheel_left_vel - wheel_right_vel) / 2.0f;
-    *vy = 0.0;
-    *wz = DIFF_WHEEL_RADIUS * (-wheel_left_vel - wheel_right_vel) / (2.0f * DIFF_BASE_RADIUS);
-}
-
-// Print mbot_params for FRAM test/debug
-static void print_mbot_params(const mbot_params_t* params) {
-    printf("Motor Polarity: %d %d %d\r\n", params->motor_polarity[0], params->motor_polarity[1], params->motor_polarity[2]);
-    printf("Encoder Polarity: %d %d %d\r\n", params->encoder_polarity[0], params->encoder_polarity[1], params->encoder_polarity[2]);
-    printf("Positive Slope: %f %f %f\r\n", params->slope_pos[0], params->slope_pos[1], params->slope_pos[2]);
-    printf("Positive Intercept: %f %f %f\r\n", params->itrcpt_pos[0], params->itrcpt_pos[1], params->itrcpt_pos[2]);
-    printf("Negative Slope: %f %f %f\r\n", params->slope_neg[0], params->slope_neg[1], params->slope_neg[2]);
-    printf("Negative Intercept: %f %f %f\r\n", params->itrcpt_neg[0], params->itrcpt_neg[1], params->itrcpt_neg[2]);
-}
-
-int mbot_init_hardware(void){
+/******************************************************
+ * Helper Functions
+ * ----------------------------------------------------
+ * These functions are used internally by the main control functions.
+ * They are not intended for modification by students. These functions
+ * provide lower-level control and utility support.
+ ******************************************************/
+static int mbot_init_hardware(void){
     printf("Initializing Hardwares...\n");
     // Initialize Motors
     mbot_motor_init(MOT_L);
@@ -658,57 +401,77 @@ int mbot_init_hardware(void){
     return MBOT_OK;
 }
 
-/**
- * @brief Main entry point
- */
-int main() {
-    // Initialize Dual CDC and stdio
-    stdio_init_all();
-    dual_cdc_init();
-    mbot_wait_ms(2000);
+static void mbot_read_imu(void) {
+    for(int i = 0; i < 3; i++) {
+        mbot_state.imu_gyro[i] = mbot_imu_data.gyro[i];
+        mbot_state.imu_accel[i] = mbot_imu_data.accel[i];
+        mbot_state.imu_mag[i] = mbot_imu_data.mag[i];
+        mbot_state.imu_rpy[i] = mbot_imu_data.rpy[i];
+    }
+    for(int i = 0; i < 4; i++) {
+        mbot_state.imu_quat[i] = mbot_imu_data.quat[i];
+    }
+}
+
+static void mbot_read_encoders(void) {
+    int64_t now = time_us_64();
+
+    // Calculate actual delta time since last encoder read
+    // mbot_state.last_encoder_time is initialized in main() before the loop starts
+    mbot_state.encoder_delta_t = now - mbot_state.last_encoder_time;
     
-    printf("\r\nMBot Classic Firmware\n");
-    printf("--------------------------------\n");
-
-    mbot_init_hardware();
-
-    mbot_read_fram(0, sizeof(params), (uint8_t*)&params);
-    int validate_status = validate_mbot_classic_FRAM_data(&params, MOT_L, MOT_R, MOT_UNUSED);
-    if (validate_status < 0){
-        printf("Failed to validate FRAM Data! Error code: %d\n", validate_status);
-        return -1;
+    // If dt is zero or negative (e.g. time_us_64 wraps or error), use nominal period
+    if (mbot_state.encoder_delta_t <= 0) {
+        mbot_state.encoder_delta_t = ((int64_t)(MAIN_LOOP_PERIOD * 1000000.0f));
     }
 
-    printf("\nCalibration Parameters:\n");
-    print_mbot_params(&params);
+    mbot_state.last_encoder_time = now; // Update for the next cycle
+    mbot_state.encoder_ticks[MOT_L] = mbot_encoder_read_count(MOT_L);
+    mbot_state.encoder_ticks[MOT_R] = mbot_encoder_read_count(MOT_R);
+    mbot_state.encoder_delta_ticks[MOT_L] = mbot_encoder_read_delta(MOT_L);
+    mbot_state.encoder_delta_ticks[MOT_R] = mbot_encoder_read_delta(MOT_R);
+}
 
-    printf("\nStarting MBot Loop...\n");
-    add_repeating_timer_ms(MAIN_LOOP_PERIOD * 1000, mbot_loop, NULL, &mbot_main_timer);
-    printf("Done Booting Up!\n");
-
-    fflush(stdout); 
-    mbot_wait_ms(100);
-
-    bool microros_enabled = false;
-    int64_t last_print_time = 0;
-    while (1) {
-        dual_cdc_task();
-
-        // micro-ROS logic
-        // if (microros_enabled) {
-        //     if (mbot_spin_micro_ros() != MBOT_OK) {
-        //         microros_enabled = false;
-        //     }
-        // } else {
-        //     int result = mbot_init_micro_ros();
-        //     if (result == MBOT_OK) {
-        //         microros_enabled = true;
-        //         printf("microROS connected\r\n");
-        //     }
-        // }
-        mbot_print_state(&mbot_state);
-        mbot_wait_ms(200);
+static void mbot_read_adc(void) {
+    const float conversion_factor = 3.0f / (1 << 12);
+    int16_t raw;
+    for(int i = 0; i < 4; i++) {
+        adc_select_input(i);
+        raw = adc_read();
+        mbot_state.analog_in[i] = conversion_factor * raw;
     }
+    // last channel is battery voltage (has 5x divider)
+    mbot_state.analog_in[3] = 5.0f * conversion_factor * raw;
+}
+
+static void mbot_calculate_motor_vel(void) {
+    float conversion = (1.0f / GEAR_RATIO) * (1.0f / ENCODER_RES) * 1E6f * 2.0f * PI;
+    int64_t delta_t = mbot_state.encoder_delta_t; // Use the corrected delta_time
     
-    return 0;
+    if (delta_t <= 0) { /* Avoid division by zero or invalid dt */ 
+        mbot_state.wheel_vel[MOT_L] = 0.0f;
+        mbot_state.wheel_vel[MOT_R] = 0.0f;
+        return; 
+    }
+
+    mbot_state.wheel_vel[MOT_L] = params.encoder_polarity[MOT_L] * 
+        (conversion / delta_t) * mbot_state.encoder_delta_ticks[MOT_L];
+    mbot_state.wheel_vel[MOT_R] = params.encoder_polarity[MOT_R] * 
+        (conversion / delta_t) * mbot_state.encoder_delta_ticks[MOT_R];
+}
+
+static void mbot_calculate_diff_body_vel(float wheel_left_vel, float wheel_right_vel, float* vx, float* vy, float* wz) {
+    // Calculate forward velocity and angular velocity
+    *vx = DIFF_WHEEL_RADIUS * (wheel_left_vel - wheel_right_vel) / 2.0f;
+    *vy = 0.0;
+    *wz = DIFF_WHEEL_RADIUS * (-wheel_left_vel - wheel_right_vel) / (2.0f * DIFF_BASE_RADIUS);
+}
+
+static void print_mbot_params(const mbot_params_t* params) {
+    printf("Motor Polarity: %d %d %d\r\n", params->motor_polarity[0], params->motor_polarity[1], params->motor_polarity[2]);
+    printf("Encoder Polarity: %d %d %d\r\n", params->encoder_polarity[0], params->encoder_polarity[1], params->encoder_polarity[2]);
+    printf("Positive Slope: %f %f %f\r\n", params->slope_pos[0], params->slope_pos[1], params->slope_pos[2]);
+    printf("Positive Intercept: %f %f %f\r\n", params->itrcpt_pos[0], params->itrcpt_pos[1], params->itrcpt_pos[2]);
+    printf("Negative Slope: %f %f %f\r\n", params->slope_neg[0], params->slope_neg[1], params->slope_neg[2]);
+    printf("Negative Intercept: %f %f %f\r\n", params->itrcpt_neg[0], params->itrcpt_neg[1], params->itrcpt_neg[2]);
 }

@@ -78,3 +78,9 @@ Use the wait function we provide.
 #include "comms/dual_cdc.h";
 mbot_wait_ms(2000);
 ```
+
+
+## Time 
+- `mbot_state.timestamp_us` is the last time the mbot_state was updated.
+- `mbot_state.last_encoder_time` is the last time the encoder was updated.
+- `now` under `mbot_publish_state` will be epoch time sync with the pi.
