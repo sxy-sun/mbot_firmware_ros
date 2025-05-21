@@ -22,12 +22,14 @@
 #include <pico/multicore.h>
 #include <hardware/clocks.h>
 #include <hardware/adc.h>
+#include "pico/time.h"
 
 // mbotlib
 #include <mbot/motor/motor.h>
 #include <mbot/encoder/encoder.h>
 #include <mbot/fram/fram.h>
 #include <mbot/imu/imu.h>
+#include <mbot/utils/utils.h>
 
 // mbot_classic_ros
 #include "mbot_classic_ros.h"
@@ -37,6 +39,10 @@
 // comms
 #include <comms/pico_uart_transports.h>
 #include <comms/dual_cdc.h>
+
+// robot control
+#include <rc/math/filter.h>
+#include <rc/mpu/mpu.h>
 
 #ifndef PI
 #define PI 3.14159265358979323846f
@@ -48,6 +54,9 @@ mbot_cmd_t mbot_cmd = {0};
 mbot_params_t params;
 mbot_bhy_config_t mbot_imu_config;
 mbot_bhy_data_t mbot_imu_data;
+static bool enable_pwm_lpf = true;
+rc_filter_t mbot_left_pwm_lpf;
+rc_filter_t mbot_right_pwm_lpf;
 
 // Global MicroROS objects
 static rcl_allocator_t allocator;
@@ -57,6 +66,7 @@ static rclc_executor_t executor;
 
 // Timer for periodic publishing
 static rcl_timer_t timer;
+static repeating_timer_t mbot_main_timer;
 
 // Define ROS publishers
 static rcl_publisher_t imu_publisher;
@@ -111,6 +121,9 @@ static void mbot_read_encoders(void);
 static void mbot_read_imu(void);
 static void mbot_read_adc(void);
 static void mbot_publish_state(void);
+static void mbot_print_state(void);
+static bool mbot_loop(repeating_timer_t *rt);
+static void print_mbot_params(const mbot_params_t* params);
 
 // Initialize microROS
 int mbot_init_micro_ros(void) {
@@ -154,7 +167,7 @@ int mbot_init_micro_ros(void) {
     ret = rclc_timer_init_default2(
         &timer,
         &support,
-        RCL_MS_TO_NS((int)(MAIN_LOOP_PERIOD * 1000)),
+        RCL_MS_TO_NS((int)(ROS_TIMER_PERIOD * 1000)),
         timer_callback,
         NULL);
     if (ret != RCL_RET_OK) {
@@ -543,20 +556,13 @@ static void mbot_publish_state(void) {
     }
 }
 
-// Timer callback for periodic publishing
-void timer_callback(rcl_timer_t * timer, int64_t last_call_time) {
-    RCLC_UNUSED(last_call_time);
-    if (timer == NULL) return;
-
-    // Get current timestamp
-    int64_t now = rmw_uros_epoch_nanos();
-    mbot_state.timestamp_us = now / 1000;  // Convert to microseconds
-
+// Main robot logic loop, runs at MAIN_LOOP_HZ (called by hardware timer)
+bool mbot_loop(repeating_timer_t *rt) {
     // Read all sensor data
     mbot_read_encoders();
     mbot_read_imu();
     mbot_read_adc();
-    
+
     // Calculate velocities and update odometry
     mbot_calculate_motor_vel();
     mbot_calculate_diff_body_vel(
@@ -576,7 +582,15 @@ void timer_callback(rcl_timer_t * timer, int64_t last_call_time) {
         &mbot_state.odom_theta
     );
 
-    // Publish all state data
+    // Print hardware state to CDC0
+    // mbot_print_state();
+    return true; // Keep timer running
+}
+
+// Timer callback for periodic ROS publishing (runs at ROS_TIMER_HZ)
+void timer_callback(rcl_timer_t * timer, int64_t last_call_time) {
+    RCLC_UNUSED(last_call_time);
+    if (timer == NULL) return;
     mbot_publish_state();
 }
 
@@ -598,58 +612,89 @@ static void mbot_calculate_diff_body_vel(float wheel_left_vel, float wheel_right
     *wz = DIFF_WHEEL_RADIUS * (-wheel_left_vel - wheel_right_vel) / (2.0f * DIFF_BASE_RADIUS);
 }
 
-/**
- * @brief Main entry point
- */
-int main() {
-    // Initialize stdio (sets up system clock and other defaults)
-    stdio_init_all();
-    
-    // Initialize dual CDC interfaces
-    dual_cdc_init();
+// Print mbot_params for FRAM test/debug
+static void print_mbot_params(const mbot_params_t* params) {
+    printf("Motor Polarity: %d %d %d\r\n", params->motor_polarity[0], params->motor_polarity[1], params->motor_polarity[2]);
+    printf("Encoder Polarity: %d %d %d\r\n", params->encoder_polarity[0], params->encoder_polarity[1], params->encoder_polarity[2]);
+    printf("Positive Slope: %f %f %f\r\n", params->slope_pos[0], params->slope_pos[1], params->slope_pos[2]);
+    printf("Positive Intercept: %f %f %f\r\n", params->itrcpt_pos[0], params->itrcpt_pos[1], params->itrcpt_pos[2]);
+    printf("Negative Slope: %f %f %f\r\n", params->slope_neg[0], params->slope_neg[1], params->slope_neg[2]);
+    printf("Negative Intercept: %f %f %f\r\n", params->itrcpt_neg[0], params->itrcpt_neg[1], params->itrcpt_neg[2]);
+}
 
-    printf("MBot Classic ROS - Starting up\r\n");
-    
-    // Initialize hardware components
-    printf("Initializing motors...\r\n");
+int mbot_init_hardware(void){
+    printf("Initializing Hardwares...\n");
+    // Initialize Motors
     mbot_motor_init(MOT_L);
     mbot_motor_init(MOT_R);
-
-    printf("Initializing encoders...\r\n");
     mbot_encoder_init();
 
-    printf("Initializing ADC...\r\n");
+    // Initialize the IMU 
+    mbot_imu_config = mbot_imu_default_config();
+    mbot_imu_config.sample_rate = 200;
+    mbot_imu_init(&mbot_imu_data, mbot_imu_config);
+
+    // Initialize ADC
     adc_init();
     adc_gpio_init(26);
     adc_gpio_init(27);
     adc_gpio_init(28);
     adc_gpio_init(29);
 
-    printf("Initializing FRAM...\r\n");
-    mbot_init_fram();
+    // Initialize PWM LPFs for smoother motion
+    mbot_left_pwm_lpf = rc_filter_empty();
+    mbot_right_pwm_lpf = rc_filter_empty();
+    rc_filter_first_order_lowpass(&mbot_left_pwm_lpf, MAIN_LOOP_PERIOD, 4.0 * MAIN_LOOP_PERIOD);
+    rc_filter_first_order_lowpass(&mbot_right_pwm_lpf, MAIN_LOOP_PERIOD, 4.0 * MAIN_LOOP_PERIOD);
 
-    printf("Initializing IMU...\r\n");
-    mbot_imu_config = mbot_imu_default_config();
-    mbot_imu_config.sample_rate = 200;
-    mbot_imu_init(&mbot_imu_data, mbot_imu_config);
+    // Initialize FRAM
+    mbot_init_fram();
+    return MBOT_OK;
+}
+
+/**
+ * @brief Main entry point
+ */
+int main() {
+    // Initialize Dual CDC and stdio
+    stdio_init_all();
+    dual_cdc_init();
+    mbot_wait_ms(2000);
     
-    // Main loop
-    printf("Entering main loop\r\n");
+    printf("\rMBot Classic Firmware\n");
+    printf("--------------------------------\n");
+
+    mbot_init_hardware();
+
+    mbot_read_fram(0, sizeof(params), (uint8_t*)&params);
+    int validate_status = validate_mbot_classic_FRAM_data(&params, MOT_L, MOT_R, MOT_UNUSED);
+    if (validate_status < 0){
+        printf("Failed to validate FRAM Data! Error code: %d\n", validate_status);
+        return -1;
+    }
+
+    printf("\nCalibration Parameters:\n");
+    print_mbot_params(&params);
+
+    printf("\nStarting MBot Loop...\n");
+    add_repeating_timer_ms(MAIN_LOOP_PERIOD * 1000, mbot_loop, NULL, &mbot_main_timer);
+    printf("Done Booting Up!\n");
+
+    fflush(stdout);
+    mbot_wait_ms(100);
+
     bool microros_enabled = false;
-    
     while (1) {
+        printf("Waiting for microROS connection...\r\n");
         // Process USB tasks every loop iteration
         dual_cdc_task();
 
-        // Handle microROS
+        // micro-ROS logic
         if (microros_enabled) {
-            // If already initialized, spin
             if (mbot_spin_micro_ros() != MBOT_OK) {
-                // If it fails, mark as disconnected
                 microros_enabled = false;
             }
         } else {
-            // Not connected - try to initialize
             int result = mbot_init_micro_ros();
             if (result == MBOT_OK) {
                 microros_enabled = true;

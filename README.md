@@ -1,6 +1,5 @@
 # MBot Firmware (ROS2 Jazzy)
 ## Project Components
-
 1. `libmicroros`: This directory contains the precompiled micro-ROS static library (`libmicroros.a`) and all necessary header files for the Raspberry Pi Pico. This library includes:
     - ROS 2 client library core functionality
     - Message type definitions
@@ -10,19 +9,12 @@
     - `library_generation.sh`: Script that sets up the build environment, compiles micro-ROS packages, and generates the static library
     - `colcon.meta`: Configuration for the colcon build system
     - `toolchain.cmake`: CMake toolchain file for cross-compiling to Raspberry Pi Pico
-
-3. `pico_uart_transport.c` & `pico_uart_transports.h`: These files implement the UART-based transport layer for micro-ROS on the Pico. The transport layer is responsible for:
-    - Opening and closing serial communication
-    - Reading and writing data over UART
-    - Managing timeouts and error handling
-    - Providing POSIX-like timing functions (`usleep` and `clock_gettime`)
-
+3. `comms`: Communication Setup
 4. `mbot`: MBot Hardware Library
 5. `rc` (Robot Control): A library providing essential functions for robot control applications.
 6. Supporting Files
     - `available_ros2_types`: A list of all ROS 2 message, service, and action types available in the micro-ROS library
     - `built_packages`: A list of all Git repositories and their specific commit hashes used to build the micro-ROS library
-
 
 ## MicroROS Integration Plan
 
@@ -54,7 +46,7 @@ We are transitioning the MBot firmware from using LCM (Lightweight Communication
    - CRLF handling is disabled for performance optimization
    - All print statements use `\r\n` instead of just `\n`
 
-### Communication
+## Communication
 The firmware uses a single USB Type-C connection with dual CDC (Communication Device Class) interfaces:
 1. **Debug Channel** (`/dev/ttyACM0`):
    - Used for firmware debug messages and status prints
@@ -67,20 +59,20 @@ The firmware uses a single USB Type-C connection with dual CDC (Communication De
 
 This dual-channel approach allows simultaneous debugging and ROS communication without additional hardware connections.
 
-#### Important: Servicing TinyUSB and Using `sleep_ms`
+### Important: Servicing TinyUSB and Using `sleep_ms`
 
 **TinyUSB (the USB stack used for CDC communication) requires frequent servicing via `tud_task()` (`dual_cdc_task()`).**
 If the USB stack is not serviced regularly (ideally every 1–10 ms), the host computer may think the device is unresponsive and disconnect the serial ports (`/dev/ttyACM0`, `/dev/ttyACM1`).
 
 **Do NOT use long `sleep_ms()` calls.**
 
-##### **Incorrect Usage (will cause USB ports to disappear):**
+#### **Incorrect Usage (will cause USB ports to disappear):**
 ```c
 // BAD: This will block USB for 2 seconds!
 sleep_ms(2000);
 ```
 
-##### **Correct Usage (keeps USB alive):**
+#### **Correct Usage (keeps USB alive):**
 Use the wait function we provide.
 ```c
 #include "comms/dual_cdc.h";

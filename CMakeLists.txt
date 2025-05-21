@@ -63,9 +63,9 @@ pico_add_extra_outputs(mbot_classic_ros)
 # Disable CRLF handling for better performance with micro-ROS
 # This means when printing to the console you need to use \r\n instead of \n
 target_compile_definitions(mbot_classic_ros PRIVATE 
-    PICO_UART_ENABLE_CRLF_SUPPORT=0
-    PICO_STDIO_ENABLE_CRLF_SUPPORT=0
-    PICO_STDIO_DEFAULT_CRLF=0
+    # PICO_UART_ENABLE_CRLF_SUPPORT=0
+    # PICO_STDIO_ENABLE_CRLF_SUPPORT=0
+    # PICO_STDIO_DEFAULT_CRLF=0
     CFG_TUD_CDC=2
 )
 
