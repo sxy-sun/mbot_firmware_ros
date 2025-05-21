@@ -2,21 +2,17 @@
  * @file mbot_classic_ros.c
  * @brief MicroROS integration for MBot Classic
  */
-#include <stdio.h>
 #include <math.h>
-#include <rcl/rcl.h>
 #include <rcl/error_handling.h>
-#include <rclc/rclc.h>
 #include <rclc/executor.h>
 #include <rmw_microros/rmw_microros.h>
 #include <rmw_microros/time_sync.h>
 #include <pico/stdlib.h>
 #include <pico/binary_info.h>
 #include <pico/multicore.h>
+#include "pico/time.h"
 #include <hardware/clocks.h>
 #include <hardware/adc.h>
-#include "pico/time.h"
-#include "mbot_print.h"
 
 // mbotlib
 #include <mbot/motor/motor.h>
@@ -28,8 +24,8 @@
 // mbot_classic_ros
 #include "mbot_classic_ros.h"
 #include "mbot_odometry.h"
-#include "config/mbot_classic_config.h"
 #include "mbot_ros_comms.h"
+#include "mbot_print.h"
 
 // comms
 #include <comms/pico_uart_transports.h>
@@ -62,10 +58,13 @@ static rclc_executor_t executor;
 static rcl_timer_t ros_publish_timer;
 static repeating_timer_t mbot_loop_timer;
 
+int mbot_init_micro_ros(void);
+int mbot_spin_micro_ros(void);
 static void mbot_publish_state(void);
-static bool mbot_loop_callback(repeating_timer_t *rt);
+static bool mbot_loop(repeating_timer_t *rt);
 void timer_callback(rcl_timer_t * timer, int64_t last_call_time);
 
+// helper functions
 static int mbot_init_hardware(void);
 static void mbot_read_imu(void);
 static void mbot_read_encoders(void);
@@ -248,7 +247,7 @@ static void mbot_publish_state(void) {
 }
 
 // Main robot logic loop, runs at MAIN_LOOP_HZ (called by hardware timer)
-bool mbot_loop_callback(repeating_timer_t *rt) {
+static bool mbot_loop(repeating_timer_t *rt) {
     mbot_read_encoders();    
     mbot_read_imu();
     mbot_read_adc();
@@ -283,8 +282,6 @@ bool mbot_loop_callback(repeating_timer_t *rt) {
 
 // Timer callback for periodic ROS publishing (runs at ROS_TIMER_HZ)
 void timer_callback(rcl_timer_t * timer, int64_t last_call_time) {
-    (void)last_call_time; // Unused
-    (void)timer;          // Unused
     mbot_publish_state();
 }
 
@@ -315,7 +312,7 @@ int main() {
 
     printf("\nStarting MBot Loop...\n");
     mbot_state.last_encoder_time = time_us_64(); 
-    if (!add_repeating_timer_ms((int32_t)(MAIN_LOOP_PERIOD * 1000.0f), mbot_loop_callback, NULL, &mbot_loop_timer)){
+    if (!add_repeating_timer_ms((int32_t)(MAIN_LOOP_PERIOD * 1000.0f), mbot_loop, NULL, &mbot_loop_timer)){
         printf("Failed to add control loop timer! Halting.\r\n");
         while(1) {tight_loop_contents();}
     }

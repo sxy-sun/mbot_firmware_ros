@@ -1,6 +1,5 @@
 #include "mbot_ros_comms.h"
 #include "mbot_classic_ros.h" // For mbot_state_t, mbot_cmd_t, and config defines
-#include <stdio.h>             // For printf in callbacks or error messages
 #include <string.h>            // For strlen, snprintf in message init
 
 // Define ROS Objects (matching extern declarations in .h)

@@ -24,6 +24,21 @@ We are transitioning the MBot firmware from using LCM (Lightweight Communication
 ### Directory Structure
 - `old_src/`: Original firmware using LCM communication
 - `src/`: New microROS-based implementation (in progress)
+- `include/config/mbot_classic_config.h`: MBot classic config file
+- `mbot/include/mbot/defs/mbot_params.h`: MBot system config file
+
+### Code Modules in `src/`
+- `mbot_classic_ros.c/.h`: Core application logic, main loop, hardware interface calls, and microROS node initialization.
+- `mbot_ros_comms.c/.h`: Handles all ROS-specific communication aspects including publisher/subscriber/service setup, message initialization, and callbacks.
+- `mbot_odometry.c/.h`: Odometry calculation utilities.
+- `mbot_print.c/.h`: Debug printing utilities.
+
+### Main Loop (`main()`) Responsibilities
+The main `while(1)` loop in `mbot_classic_ros.c` is responsible for:
+- Frequently calling `dual_cdc_task()` to service the USB stack.
+- Frequently calling `mbot_spin_micro_ros()` (once microROS is initialized) to process ROS events (subscriptions, service calls, and ROS timers).
+- Handling other non-blocking tasks like periodic state printing.
+Long blocking delays (e.g., `mbot_wait_ms()`) in this loop must be used cautiously to ensure USB and ROS responsiveness.
 
 ### Key Technical Considerations
 1. **No Custom Message Types**
@@ -36,15 +51,16 @@ We are transitioning the MBot firmware from using LCM (Lightweight Communication
 
 3. **Timing Management**
    - Using ROS time synchronization instead of custom timestamps
-   - Maintaining fixed-rate control loops (25Hz for state publishing)
+   - Maintaining fixed-rate control loops (e.g., 25Hz for sensor acquisition and control logic via `mbot_loop`)
+   - Periodic ROS state publishing (e.g., 20Hz via `timer_callback` triggered by `ros_publish_timer`)
 
 4. **State Tracking**
-   - Using local state variables for robot state
-   - Synchronizing state between hardware readings and ROS messages
-
-5. **CRLF Handling**
-   - CRLF handling is disabled for performance optimization
-   - All print statements use `\r\n` instead of just `\n`
+   - Using local state variables for robot state (`mbot_state_t`, `mbot_cmd_t`)
+   - Synchronizing state between hardware readings and ROS messages (hardware readings update `mbot_state`, ROS messages are populated from `mbot_state`, `mbot_cmd` updated by ROS callbacks).
+   Key global state variables:
+     - `mbot_state_t mbot_state`: Defined in `mbot_classic_ros.c`, holds the current snapshot of all robot sensor data, odometry, and derived states. Updated by `mbot_loop`. Read by `mbot_publish_state`.
+     - `mbot_cmd_t mbot_cmd`: Defined in `mbot_classic_ros.c`, stores the latest commands received via ROS subscriptions. Updated by ROS callbacks in `mbot_ros_comms.c`. Read by motor control logic in `mbot_loop`.
+     - `mbot_params_t params`: Stores calibration parameters loaded from FRAM.
 
 ## Communication
 The firmware uses a single USB Type-C connection with dual CDC (Communication Device Class) interfaces:
@@ -79,8 +95,7 @@ Use the wait function we provide.
 mbot_wait_ms(2000);
 ```
 
-
 ## Time 
-- `mbot_state.timestamp_us` is the last time the mbot_state was updated.
-- `mbot_state.last_encoder_time` is the last time the encoder was updated.
-- `now` under `mbot_publish_state` will be epoch time sync with the pi.
+- `mbot_state.timestamp_us` is the last time the mbot_state was updated by `mbot_loop`.
+- `mbot_state.last_encoder_time` is the Pico local time recorded at the start of the encoder read in `mbot_loop`, used for calculating `encoder_delta_t`.
+- `now` variable (local to `mbot_publish_state` function) holds the ROS-synchronized epoch time obtained via `rmw_uros_epoch_nanos()`, used for timestamping outgoing ROS messages.
