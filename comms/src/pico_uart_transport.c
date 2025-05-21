@@ -20,14 +20,14 @@ int clock_gettime(clockid_t unused, struct timespec *tp)
 // Open transport: Simple open, dual_cdc_init() already called in main
 bool pico_serial_transport_open(struct uxrCustomTransport * transport)
 {
-    printf("microROS transport open requested. CDC1 connected: %s\r\n", 
-           dual_cdc_connected() ? "YES" : "NO");
+    // printf("microROS transport open requested. CDC1 connected: %s\r\n", 
+    //        dual_cdc_connected() ? "YES" : "NO");
     return true;
 }
 
 bool pico_serial_transport_close(struct uxrCustomTransport * transport)
 {
-    printf("microROS transport close requested\r\n");
+    // printf("microROS transport close requested\r\n");
     return true;
 }
 

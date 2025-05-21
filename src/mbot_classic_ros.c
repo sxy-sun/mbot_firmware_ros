@@ -23,6 +23,7 @@
 #include <hardware/clocks.h>
 #include <hardware/adc.h>
 #include "pico/time.h"
+#include "mbot_print.h"
 
 // mbotlib
 #include <mbot/motor/motor.h>
@@ -114,14 +115,12 @@ void timer_callback(rcl_timer_t * timer, int64_t last_call_time);
 void reset_odometry_callback(const void * request, void * response);
 void reset_encoders_callback(const void * request, void * response);
 
-// Function prototypes
 static void mbot_calculate_diff_body_vel(float wheel_left_vel, float wheel_right_vel, float* vx, float* vy, float* wz);
 static void mbot_calculate_motor_vel(void);
 static void mbot_read_encoders(void);
 static void mbot_read_imu(void);
 static void mbot_read_adc(void);
 static void mbot_publish_state(void);
-static void mbot_print_state(void);
 static bool mbot_loop(repeating_timer_t *rt);
 static void print_mbot_params(const mbot_params_t* params);
 
@@ -443,31 +442,39 @@ static void mbot_calculate_motor_vel(void) {
 }
 
 static void mbot_read_encoders(void) {
-    // TODO: Implement actual encoder reading
-    mbot_state.encoder_ticks[MOT_R] = 0;
-    mbot_state.encoder_delta_ticks[MOT_R] = 0;
-    mbot_state.encoder_ticks[MOT_L] = 0;
-    mbot_state.encoder_delta_ticks[MOT_L] = 0;
+    int64_t now = time_us_64();
+    int64_t delta_time = now - mbot_state.last_encoder_time;
+    mbot_state.last_encoder_time = now;
+
+    mbot_state.encoder_ticks[MOT_L] = mbot_encoder_read_count(MOT_L);
+    mbot_state.encoder_ticks[MOT_R] = mbot_encoder_read_count(MOT_R);
+    mbot_state.encoder_delta_ticks[MOT_L] = mbot_encoder_read_delta(MOT_L);
+    mbot_state.encoder_delta_ticks[MOT_R] = mbot_encoder_read_delta(MOT_R);
+    // Do NOT update mbot_state.timestamp_us here!
 }
 
 static void mbot_read_imu(void) {
-    // TODO: Implement actual IMU reading
     for(int i = 0; i < 3; i++) {
-        mbot_state.imu_gyro[i] = 0;
-        mbot_state.imu_accel[i] = 0;
-        mbot_state.imu_mag[i] = 0;
-        mbot_state.imu_rpy[i] = 0;
+        mbot_state.imu_gyro[i] = mbot_imu_data.gyro[i];
+        mbot_state.imu_accel[i] = mbot_imu_data.accel[i];
+        mbot_state.imu_mag[i] = mbot_imu_data.mag[i];
+        mbot_state.imu_rpy[i] = mbot_imu_data.rpy[i];
     }
     for(int i = 0; i < 4; i++) {
-        mbot_state.imu_quat[i] = 0;
+        mbot_state.imu_quat[i] = mbot_imu_data.quat[i];
     }
 }
 
 static void mbot_read_adc(void) {
-    // TODO: Implement actual ADC reading
+    const float conversion_factor = 3.0f / (1 << 12);
+    int16_t raw;
     for(int i = 0; i < 4; i++) {
-        mbot_state.analog_in[i] = 0;
+        adc_select_input(i);
+        raw = adc_read();
+        mbot_state.analog_in[i] = conversion_factor * raw;
     }
+    // last channel is battery voltage (has 5x divider)
+    mbot_state.analog_in[3] = 5.0f * conversion_factor * raw;
 }
 
 // Publish all robot state to ROS topics
@@ -558,12 +565,13 @@ static void mbot_publish_state(void) {
 
 // Main robot logic loop, runs at MAIN_LOOP_HZ (called by hardware timer)
 bool mbot_loop(repeating_timer_t *rt) {
-    // Read all sensor data
-    mbot_read_encoders();
+    mbot_read_encoders();    
     mbot_read_imu();
     mbot_read_adc();
 
-    // Calculate velocities and update odometry
+    // Update the global state timestamp ONCE after all sensors are read
+    mbot_state.timestamp_us = time_us_64();
+
     mbot_calculate_motor_vel();
     mbot_calculate_diff_body_vel(
         mbot_state.wheel_vel[MOT_L],
@@ -581,9 +589,7 @@ bool mbot_loop(repeating_timer_t *rt) {
         &mbot_state.odom_y,
         &mbot_state.odom_theta
     );
-
-    // Print hardware state to CDC0
-    // mbot_print_state();
+    
     return true; // Keep timer running
 }
 
@@ -661,7 +667,7 @@ int main() {
     dual_cdc_init();
     mbot_wait_ms(2000);
     
-    printf("\rMBot Classic Firmware\n");
+    printf("\r\nMBot Classic Firmware\n");
     printf("--------------------------------\n");
 
     mbot_init_hardware();
@@ -680,27 +686,28 @@ int main() {
     add_repeating_timer_ms(MAIN_LOOP_PERIOD * 1000, mbot_loop, NULL, &mbot_main_timer);
     printf("Done Booting Up!\n");
 
-    fflush(stdout);
+    fflush(stdout); 
     mbot_wait_ms(100);
 
     bool microros_enabled = false;
+    int64_t last_print_time = 0;
     while (1) {
-        printf("Waiting for microROS connection...\r\n");
-        // Process USB tasks every loop iteration
         dual_cdc_task();
 
         // micro-ROS logic
-        if (microros_enabled) {
-            if (mbot_spin_micro_ros() != MBOT_OK) {
-                microros_enabled = false;
-            }
-        } else {
-            int result = mbot_init_micro_ros();
-            if (result == MBOT_OK) {
-                microros_enabled = true;
-                printf("microROS connected\r\n");
-            }
-        }
+        // if (microros_enabled) {
+        //     if (mbot_spin_micro_ros() != MBOT_OK) {
+        //         microros_enabled = false;
+        //     }
+        // } else {
+        //     int result = mbot_init_micro_ros();
+        //     if (result == MBOT_OK) {
+        //         microros_enabled = true;
+        //         printf("microROS connected\r\n");
+        //     }
+        // }
+        mbot_print_state(&mbot_state);
+        mbot_wait_ms(200);
     }
     
     return 0;

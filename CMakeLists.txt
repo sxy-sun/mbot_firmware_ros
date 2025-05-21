@@ -43,6 +43,8 @@ add_executable(mbot_classic_ros
     src/mbot_classic_ros.h
     src/mbot_odometry.c
     src/mbot_odometry.h
+    src/mbot_print.c
+    src/mbot_print.h
 )
 
 target_link_libraries(mbot_classic_ros
