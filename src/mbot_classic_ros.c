@@ -58,6 +58,8 @@ static rclc_executor_t executor;
 static rcl_timer_t ros_publish_timer;
 static repeating_timer_t mbot_loop_timer;
 
+static agent_state_t agent_state = WAITING_AGENT;
+
 int mbot_init_micro_ros(void);
 int mbot_spin_micro_ros(void);
 static void mbot_publish_state(void);
@@ -72,54 +74,45 @@ static void mbot_read_adc(void);
 static void mbot_calculate_motor_vel(void);
 static void mbot_calculate_diff_body_vel(float wheel_left_vel, float wheel_right_vel, float* vx, float* vy, float* wz);
 static void print_mbot_params(const mbot_params_t* params);
+int mbot_destroy_micro_ros(void);
 
 // Initialize microROS
 int mbot_init_micro_ros(void) {
-    // Set up transports
-    rmw_uros_set_custom_transport(
-        true,
-        NULL,
-        pico_serial_transport_open,
-        pico_serial_transport_close,
-        pico_serial_transport_write,
-        pico_serial_transport_read
-    );
-
-    // Initialize allocator
+    printf("Getting default allocator...\n");
     allocator = rcl_get_default_allocator();
 
-    // Try to ping agent - non-blocking approach with short timeout
-    rcl_ret_t ret = rmw_uros_ping_agent(100, 1);
+    printf("Initializing rclc support...\n");
+    rcl_ret_t ret = rclc_support_init(&support, 0, NULL, &allocator);
     if (ret != RCL_RET_OK) {
-        return MBOT_ERROR_AGENT_UNREACHABLE;
-    }
-
-    // From here, we proceed with initialization since agent is available
-    ret = rclc_support_init(&support, 0, NULL, &allocator);
-    if (ret != RCL_RET_OK) {
+        printf("rclc_support_init failed: %d\n", ret);
         return MBOT_ERROR;
     }
     
-    // Create node
+    printf("Creating node...\n");
     ret = rclc_node_init_default(&node, "pico_node", "", &support);
     if (ret != RCL_RET_OK) {
+        printf("rclc_node_init_default failed: %d\n", ret);
         return MBOT_ERROR;
     }
     
     // Initialize ROS messages, publishers, subscribers, services using the new module
+    printf("Initializing ROS messages...\n");
     ret = mbot_ros_comms_init_messages(&allocator);
     if (ret != MBOT_OK) return MBOT_ERROR;
 
+    printf("Initializing publishers...\n");
     ret = mbot_ros_comms_init_publishers(&node);
     if (ret != MBOT_OK) return MBOT_ERROR;
 
+    printf("Initializing subscribers...\n");
     ret = mbot_ros_comms_init_subscribers(&node);
     if (ret != MBOT_OK) return MBOT_ERROR;
-
+    
+    printf("Initializing services...\n");
     ret = mbot_ros_comms_init_services(&node);
     if (ret != MBOT_OK) return MBOT_ERROR;
     
-    // Create timer for periodic state publishing
+    printf("Initializing timer...\n");
     ret = rclc_timer_init_default2(
         &ros_publish_timer,
         &support,
@@ -130,19 +123,19 @@ int mbot_init_micro_ros(void) {
         return MBOT_ERROR;
     }
     
-    // Create executor
+    printf("Initializing executor...\n");
     ret = rclc_executor_init(&executor, &support.context, 6, &allocator);
     if (ret != RCL_RET_OK) {
         return MBOT_ERROR;
     }
     
-    // Add timer to executor
+    printf("Adding timer to executor...\n");
     ret = rclc_executor_add_timer(&executor, &ros_publish_timer);
     if (ret != RCL_RET_OK) {
         return MBOT_ERROR;
     }
     
-    // Add subscribers and services to executor using the helper from the comms module
+    printf("Adding subscribers and services to executor...\n");
     ret = mbot_ros_comms_add_to_executor(&executor);
     if (ret != MBOT_OK) return MBOT_ERROR;
     
@@ -303,11 +296,11 @@ int main() {
 
     printf("\nCalibration Parameters:\n");
     print_mbot_params(&params);
+    mbot_wait_ms(1000);
 
     int validate_status = validate_mbot_classic_FRAM_data(&params, MOT_L, MOT_R, MOT_UNUSED);
     if (validate_status < 0){
         printf("Failed to validate FRAM Data! Error code: %d\n", validate_status);
-        return -1;
     }
 
     printf("\nStarting MBot Loop...\n");
@@ -317,45 +310,85 @@ int main() {
         while(1) {tight_loop_contents();}
     }
 
-    printf("Initializing microROS...\n");
-    // TODO: Initialize microROS here - This is where mbot_init_micro_ros() should be called.
-    //       And its return status should be checked to proceed.
-    // bool microros_initialized_successfully = false; // Variable to track initialization status
+    rmw_ret_t rmw_ret = rmw_uros_set_custom_transport(
+        true,
+        NULL,
+        pico_serial_transport_open,
+        pico_serial_transport_close,
+        pico_serial_transport_write,
+        pico_serial_transport_read
+    );
+    if (rmw_ret != RMW_RET_OK) {
+        printf("rmw_uros_set_custom_transport failed: %d\n", rmw_ret);
+        return MBOT_ERROR;
+    }
 
     printf("Done Booting Up!\n");
     fflush(stdout); 
 
-    static int64_t last_print_time = 0;
+    mbot_state.comms_active = false;
+    static int64_t last_200ms_time = 0;
+    static agent_state_t last_agent_state = -1;
     while (1) {
         dual_cdc_task(); // Keep USB alive - CRITICAL
 
-        // TODO: Micro-ROS Logic - UNCOMMENT AND COMPLETE THIS SECTION
-        // if (microros_initialized_successfully) {
-        //     if (mbot_spin_micro_ros() != MBOT_OK) {
-        //         // Handle spin error - perhaps agent disconnected?
-        //         printf("microROS spin error. Agent might have disconnected.\r\n");
-        //         // microros_initialized_successfully = false; // Attempt to re-initialize or enter error state
-        //         // mbot_state.comms_active = false;
-        //         // TODO: Implement robust error handling for microROS disconnection (e.g., retry N times, then signal error)
-        //     }
-        // } else {
-        //     // Attempt to initialize microROS if not already done (or if re-initialization is needed)
-        //     // printf("Attempting to initialize microROS...\r\n"); // Repetitive if called every loop iteration
-        //     // if (mbot_init_micro_ros() == MBOT_OK) {
-        //     //     microros_initialized_successfully = true;
-        //     //     printf("microROS Initialized Successfully.\r\n");
-        //     //     // mbot_state.comms_active = true; // Set true once agent is confirmed, not just init
-        //     // } else {
-        //     //     // printf("microROS initialization failed. Will retry.\r\n");
-        //     //     mbot_wait_ms(1000); // Wait before retrying to prevent spamming
-        //     // }
-        // }
-        // TODO:
-        // Add a line in print table to show if microROS is active or not
-        // Non-blocking periodic print
-        if (time_us_64() - last_print_time > 200000) { // 200ms interval
-            mbot_print_state(&mbot_state);
-            last_print_time = time_us_64();
+        int64_t now = time_us_64();
+        if (now - last_200ms_time > 200000) { // 200ms interval
+            last_200ms_time = now;
+
+            switch (agent_state) {
+                case WAITING_AGENT:
+                    if (last_agent_state != agent_state) {
+                        printf("\n[STATE] WAITING_AGENT\n");
+                        last_agent_state = agent_state;
+                    }
+                    rcl_ret_t ping_ret = rmw_uros_ping_agent(100, 1);
+                    if (ping_ret == RMW_RET_OK) {
+                        agent_state = AGENT_AVAILABLE;
+                    }
+                    break;
+
+                case AGENT_AVAILABLE:
+                    if (last_agent_state != agent_state) {
+                        printf("\n[STATE] AGENT_AVAILABLE\n");
+                        last_agent_state = agent_state;
+                    }
+                    if (mbot_init_micro_ros() == MBOT_OK) {
+                        agent_state = AGENT_CONNECTED;
+                    } else {
+                        printf("[ERROR] micro-ROS initialization failed!\n");
+                        mbot_destroy_micro_ros();
+                        agent_state = WAITING_AGENT;
+                    }
+                    break;
+
+                case AGENT_CONNECTED:
+                    if (last_agent_state != agent_state) {
+                        printf("\n[STATE] AGENT_CONNECTED\n");
+                        last_agent_state = agent_state;
+                    }
+                    if (rmw_uros_ping_agent(100, 1) != RMW_RET_OK) {
+                        agent_state = AGENT_DISCONNECTED;
+                    } else {
+                        if (mbot_spin_micro_ros() != MBOT_OK) {
+                            agent_state = AGENT_DISCONNECTED;
+                        }
+                        mbot_state.comms_active = true;
+                        mbot_print_state(&mbot_state);
+                    }
+                    break;
+
+                case AGENT_DISCONNECTED:
+                    if (last_agent_state != agent_state) {
+                        printf("\n[STATE] AGENT_DISCONNECTED\n");
+                        last_agent_state = agent_state;
+                    }
+                    mbot_destroy_micro_ros();
+                    mbot_state.comms_active = false;
+                    agent_state = WAITING_AGENT;
+                    break;
+            }
+            fflush(stdout); 
         }
     }
     return 0;
@@ -465,10 +498,88 @@ static void mbot_calculate_diff_body_vel(float wheel_left_vel, float wheel_right
 }
 
 static void print_mbot_params(const mbot_params_t* params) {
-    printf("Motor Polarity: %d %d %d\r\n", params->motor_polarity[0], params->motor_polarity[1], params->motor_polarity[2]);
-    printf("Encoder Polarity: %d %d %d\r\n", params->encoder_polarity[0], params->encoder_polarity[1], params->encoder_polarity[2]);
-    printf("Positive Slope: %f %f %f\r\n", params->slope_pos[0], params->slope_pos[1], params->slope_pos[2]);
-    printf("Positive Intercept: %f %f %f\r\n", params->itrcpt_pos[0], params->itrcpt_pos[1], params->itrcpt_pos[2]);
-    printf("Negative Slope: %f %f %f\r\n", params->slope_neg[0], params->slope_neg[1], params->slope_neg[2]);
-    printf("Negative Intercept: %f %f %f\r\n", params->itrcpt_neg[0], params->itrcpt_neg[1], params->itrcpt_neg[2]);
+    printf("Motor Polarity: %d %d\n", params->motor_polarity[MOT_L], params->motor_polarity[MOT_R]);
+    printf("Encoder Polarity: %d %d\n", params->encoder_polarity[MOT_L], params->encoder_polarity[MOT_R]);
+    printf("Positive Slope: %f %f\n", params->slope_pos[MOT_L], params->slope_pos[MOT_R]);
+    printf("Positive Intercept: %f %f\n", params->itrcpt_pos[MOT_L], params->itrcpt_pos[MOT_R]);
+    printf("Negative Slope: %f %f\n", params->slope_neg[MOT_L], params->slope_neg[MOT_R]);
+    printf("Negative Intercept: %f %f\n", params->itrcpt_neg[MOT_L], params->itrcpt_neg[MOT_R]);
+}
+
+int mbot_destroy_micro_ros(void) {
+    printf("\nDestroying micro-ROS entities...\n");
+    rcl_ret_t ret;
+    int error = 0;
+
+    // Destroy executor
+    ret = rclc_executor_fini(&executor);
+    if (ret != RCL_RET_OK) {
+        printf("[ERROR] Failed to destroy executor: %d\n", ret);
+        error = 1;
+    }
+
+    // Destroy timer
+    ret = rcl_timer_fini(&ros_publish_timer);
+    if (ret != RCL_RET_OK) {
+        printf("[ERROR] Failed to destroy timer: %d\n", ret);
+        error = 1;
+    }
+
+    // Destroy publishers
+    ret = rcl_publisher_fini(&imu_publisher, &node);
+    if (ret != RCL_RET_OK) printf("[ERROR] Failed to destroy imu_publisher: %d\n", ret);
+    ret = rcl_publisher_fini(&odom_publisher, &node);
+    if (ret != RCL_RET_OK) printf("[ERROR] Failed to destroy odom_publisher: %d\n", ret);
+    ret = rcl_publisher_fini(&encoders_publisher, &node);
+    if (ret != RCL_RET_OK) printf("[ERROR] Failed to destroy encoders_publisher: %d\n", ret);
+    ret = rcl_publisher_fini(&motor_vel_publisher, &node);
+    if (ret != RCL_RET_OK) printf("[ERROR] Failed to destroy motor_vel_publisher: %d\n", ret);
+    ret = rcl_publisher_fini(&motor_pwm_publisher, &node);
+    if (ret != RCL_RET_OK) printf("[ERROR] Failed to destroy motor_pwm_publisher: %d\n", ret);
+    ret = rcl_publisher_fini(&analog_publisher, &node);
+    if (ret != RCL_RET_OK) printf("[ERROR] Failed to destroy analog_publisher: %d\n", ret);
+    ret = rcl_publisher_fini(&mbot_vel_publisher, &node);
+    if (ret != RCL_RET_OK) printf("[ERROR] Failed to destroy mbot_vel_publisher: %d\n", ret);
+
+    // Destroy subscribers
+    ret = rcl_subscription_fini(&cmd_vel_subscriber, &node);
+    if (ret != RCL_RET_OK) printf("[ERROR] Failed to destroy cmd_vel_subscriber: %d\n", ret);
+    ret = rcl_subscription_fini(&motor_vel_cmd_subscriber, &node);
+    if (ret != RCL_RET_OK) printf("[ERROR] Failed to destroy motor_vel_cmd_subscriber: %d\n", ret);
+    ret = rcl_subscription_fini(&motor_pwm_cmd_subscriber, &node);
+    if (ret != RCL_RET_OK) printf("[ERROR] Failed to destroy motor_pwm_cmd_subscriber: %d\n", ret);
+
+    // Destroy services
+    ret = rcl_service_fini(&reset_odometry_service, &node);
+    if (ret != RCL_RET_OK) printf("[ERROR] Failed to destroy reset_odometry_service: %d\n", ret);
+    ret = rcl_service_fini(&reset_encoders_service, &node);
+    if (ret != RCL_RET_OK) printf("[ERROR] Failed to destroy reset_encoders_service: %d\n", ret);
+
+    // Destroy node
+    ret = rcl_node_fini(&node);
+    if (ret != RCL_RET_OK) {
+        printf("[ERROR] Failed to destroy node: %d\n", ret);
+        error = 1;
+    }
+
+    // Destroy support
+    ret = rclc_support_fini(&support);
+    if (ret != RCL_RET_OK) {
+        printf("[ERROR] Failed to destroy support: %d\n", ret);
+        error = 1;
+    }
+
+    // Free dynamically allocated message memory (frame_id, child_frame_id, data arrays)
+    if (imu_msg.header.frame_id.data) { free(imu_msg.header.frame_id.data); imu_msg.header.frame_id.data = NULL; }
+    if (odom_msg.header.frame_id.data) { free(odom_msg.header.frame_id.data); odom_msg.header.frame_id.data = NULL; }
+    if (odom_msg.child_frame_id.data) { free(odom_msg.child_frame_id.data); odom_msg.child_frame_id.data = NULL; }
+    if (encoders_msg.data.data) { free(encoders_msg.data.data); encoders_msg.data.data = NULL; }
+    if (motor_vel_msg.data.data) { free(motor_vel_msg.data.data); motor_vel_msg.data.data = NULL; }
+    if (motor_pwm_msg.data.data) { free(motor_pwm_msg.data.data); motor_pwm_msg.data.data = NULL; }
+    if (analog_msg.data.data) { free(analog_msg.data.data); analog_msg.data.data = NULL; }
+    if (motor_vel_cmd_msg_buffer.data.data) { free(motor_vel_cmd_msg_buffer.data.data); motor_vel_cmd_msg_buffer.data.data = NULL; }
+    if (motor_pwm_cmd_msg_buffer.data.data) { free(motor_pwm_cmd_msg_buffer.data.data); motor_pwm_cmd_msg_buffer.data.data = NULL; }
+
+    if (error) return MBOT_ERROR;
+    return MBOT_OK;
 }

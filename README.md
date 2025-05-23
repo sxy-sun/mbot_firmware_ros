@@ -33,12 +33,86 @@ We are transitioning the MBot firmware from using LCM (Lightweight Communication
 - `mbot_odometry.c/.h`: Odometry calculation utilities.
 - `mbot_print.c/.h`: Debug printing utilities.
 
-### Main Loop (`main()`) Responsibilities
-The main `while(1)` loop in `mbot_classic_ros.c` is responsible for:
-- Frequently calling `dual_cdc_task()` to service the USB stack.
-- Frequently calling `mbot_spin_micro_ros()` (once microROS is initialized) to process ROS events (subscriptions, service calls, and ROS timers).
-- Handling other non-blocking tasks like periodic state printing.
-Long blocking delays (e.g., `mbot_wait_ms()`) in this loop must be used cautiously to ensure USB and ROS responsiveness.
+### Future plan
+The function rclc_support_init in micro-ROS does require a connection to the micro-ROS Agent to succeed. When you call rclc_support_init, it attempts to establish communication with the Agent, and if the Agent is not reachable, the function will fail after a configurable timeout period. This means that initializing micro-ROS support with this function is not just a local setup; it actively tries to connect to the Agent as part of its process.
+
+If the Agent is not running or cannot be reached, rclc_support_init will block and retry several times (by default, up to 10 times with a 1-second timeout per attempt), and then it will return an error if the connection cannot be established. This behavior can cause your application to "freeze" or hang during initialization if the Agent is not available.
+
+The rmw_uros_ping_agent function allows you to verify if the micro-ROS Agent is available before calling initialization functions like rclc_support_init. This can help you avoid long blocking calls or failed initializations if the Agent is not running or reachable.
+
+After initialization, if the connection to the Agent drops, micro-ROS does not automatically halt or crash. Instead, the client will continue running, but communication-dependent operations (like publishing or subscribing) will fail until the Agent is available again. For example, publishing will not work, and you may see error messages or failed status codes in your application. Timers and some other local logic can still execute, but their timing and behavior may be affected if they depend on Agent communication.
+
+To handle reconnections robustly, you can implement a state machine in your application that:
+
+Pings the Agent until it is reachable.
+
+Initializes micro-ROS and creates entities when the Agent is available.
+
+Monitors the connection and, if the Agent becomes unreachable, destroys entities and returns to waiting for the Agent to reconnect.
+
+This approach allows your application to actively wait for reconnection and recover from Agent disconnections, rather than halting or requiring a restart
+
+
+```
+// States
+enum State {
+  WAITING_AGENT,
+  AGENT_AVAILABLE,
+  AGENT_CONNECTED,
+  AGENT_DISCONNECTED
+};
+
+// Global state tracker
+State current_state = WAITING_AGENT;
+
+void main() {
+  while(true) {
+    switch(current_state) {
+      case WAITING_AGENT:
+        if (rmw_uros_ping_agent(100, 1) == RMW_RET_OK) { // [1]
+          current_state = AGENT_AVAILABLE;
+        }
+        break;
+
+      case AGENT_AVAILABLE:
+        if (initialize_micro_ros_entities()) { // Creates nodes, executors, etc [1]
+          current_state = AGENT_CONNECTED;
+        } else {
+          destroy_entities(); // Cleanup if initialization fails [4]
+          current_state = WAITING_AGENT;
+        }
+        break;
+
+      case AGENT_CONNECTED:
+        if (rmw_uros_ping_agent(100, 1) != RMW_RET_OK) { // [1]
+          current_state = AGENT_DISCONNECTED;
+        } else {
+          rclc_executor_spin_some(executor, 100); // Normal operation
+        }
+        break;
+
+      case AGENT_DISCONNECTED:
+        destroy_entities(); // Critical cleanup step [4]
+        current_state = WAITING_AGENT;
+        break;
+    }
+  }
+}
+
+// Placeholder functions
+bool initialize_micro_ros_entities() {
+  // 1. rclc_support_init()
+  // 2. Create nodes, publishers, subscribers
+  // 3. Set up executors
+  return true; // Return success status
+}
+
+void destroy_entities() {
+  // 1. Destroy executors
+  // 2. Destroy nodes
+  // 3. Cleanup support
+}
+```
 
 ### Key Technical Considerations
 1. **No Custom Message Types**

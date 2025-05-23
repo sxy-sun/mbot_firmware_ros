@@ -53,10 +53,11 @@ typedef struct {
     float imu_rpy[3];   // Roll, pitch, yaw
     // Analog inputs
     float analog_in[4]; // 4 ADC channels
-    // Status
-    bool comms_active;
+    // Encoder data
     int64_t last_encoder_time;
     int64_t encoder_delta_t;
+    // Status
+    bool comms_active;
 } mbot_state_t;
 
 // Command structure
@@ -68,6 +69,14 @@ typedef struct {
     float motor_pwm[NUM_MOT_SLOTS];
     int drive_mode;  // 0=PWM, 1=wheel vel, 2=body vel
 } mbot_cmd_t;
+
+// Agent connection state machine
+typedef enum {
+    WAITING_AGENT,
+    AGENT_AVAILABLE,
+    AGENT_CONNECTED,
+    AGENT_DISCONNECTED
+} agent_state_t;
 
 // Extern declarations for global state variables defined in mbot_classic_ros.c
 extern mbot_state_t mbot_state;

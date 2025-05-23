@@ -100,6 +100,7 @@ int mbot_ros_comms_init_messages(rcl_allocator_t* allocator) {
 
 int mbot_ros_comms_init_publishers(rcl_node_t *node) {
     rcl_ret_t ret;
+    printf("Initializing imu publisher...\n");
     ret = rclc_publisher_init_default(
         &imu_publisher,
         node,
@@ -107,6 +108,7 @@ int mbot_ros_comms_init_publishers(rcl_node_t *node) {
         "imu");
     if (ret != RCL_RET_OK) return MBOT_ERROR;
 
+    printf("Initializing odom publisher...\n");
     ret = rclc_publisher_init_default(
         &odom_publisher,
         node,
@@ -114,6 +116,7 @@ int mbot_ros_comms_init_publishers(rcl_node_t *node) {
         "odom");
     if (ret != RCL_RET_OK) return MBOT_ERROR;
 
+    printf("Initializing encoders publisher...\n");
     ret = rclc_publisher_init_default(
         &encoders_publisher,
         node,
@@ -121,6 +124,7 @@ int mbot_ros_comms_init_publishers(rcl_node_t *node) {
         "encoders");
     if (ret != RCL_RET_OK) return MBOT_ERROR;
 
+    printf("Initializing mbot_vel publisher...\n");
     ret = rclc_publisher_init_default(
         &mbot_vel_publisher,
         node,
@@ -128,6 +132,7 @@ int mbot_ros_comms_init_publishers(rcl_node_t *node) {
         "mbot_vel");
     if (ret != RCL_RET_OK) return MBOT_ERROR;
 
+    printf("Initializing motor_vel publisher...\n");
     ret = rclc_publisher_init_default(
         &motor_vel_publisher,
         node,
@@ -135,6 +140,7 @@ int mbot_ros_comms_init_publishers(rcl_node_t *node) {
         "motor_vel");
     if (ret != RCL_RET_OK) return MBOT_ERROR;
 
+    printf("Initializing motor_pwm publisher...\n");
     ret = rclc_publisher_init_default(
         &motor_pwm_publisher,
         node,
@@ -142,6 +148,7 @@ int mbot_ros_comms_init_publishers(rcl_node_t *node) {
         "motor_pwm");
     if (ret != RCL_RET_OK) return MBOT_ERROR;
 
+    printf("Initializing analog publisher...\n");
     ret = rclc_publisher_init_default(
         &analog_publisher,
         node,

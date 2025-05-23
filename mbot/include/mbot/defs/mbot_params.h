@@ -7,7 +7,6 @@
 #define COMMS_OK 1
 #define MBOT_TIMEOUT_US 1000000
 #define MBOT_ERROR_NO_AGENT        -2  // No CDC1 connection detected
-#define MBOT_ERROR_AGENT_UNREACHABLE -3  // CDC1 connected but no agent responding
 
 #define SYS_CLOCK       125000 //system clock in kHz
 #define PWM_FREQ        10000
